@@ -57,6 +57,10 @@ total position error: a perfect order is 100%, and the exact reverse order is 0%
 ```bash
 npm run dev              # start the dev server at http://localhost:3000
 npm test                 # run the unit tests
+npm run test:e2e         # run the browser smoke test with system Chrome/Edge
 npm run test:robustness  # run the slower 500-seed sweep
 npm run build            # production build
 ```
+
+`npm run test:e2e` uses an installed Chrome or Edge browser. Set
+`CHROME_EXECUTABLE_PATH` if the browser is installed somewhere nonstandard.

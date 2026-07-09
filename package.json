@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run --exclude **/*.robustness.test.ts",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:robustness": "vitest run src/lib/physics.robustness.test.ts"
   },
   "dependencies": {
