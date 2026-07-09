@@ -231,7 +231,7 @@ function shuffle<T>(items: T[], random: () => number) {
   return copy;
 }
 
-function createSeededRandom(seed: string) {
+export function createSeededRandom(seed: string) {
   let hash = 2166136261;
 
   for (let index = 0; index < seed.length; index += 1) {
