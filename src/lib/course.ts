@@ -261,24 +261,29 @@ function buildLayer(random: () => number, y: number): CourseElement[] {
   ];
 }
 
-/** A converging V-funnel that serializes the pack, leaving a central gap to the sensor. */
+/**
+ * A converging V-funnel that serializes the pack, leaving a central gap to the sensor.
+ * Each arm slopes DOWN toward the centre: the left arm rotates -0.4 rad about Z (its inner
+ * +X tip drops), the right arm +0.4 rad (its inner -X tip drops), so marbles slide inward
+ * into a ~2.4-unit central gap. Outer ends embed into the side walls (no outer escape route).
+ */
 function buildFunnel(): CuboidSpec[] {
   const funnel: PhysicsProps = { restitution: 0.2, friction: 0.3 };
   return [
     {
       kind: "cuboid",
       role: "funnel",
-      half: v3(4, 0.3, HALF_DEPTH),
-      position: v3(-2.6, FUNNEL_Y, 0),
-      rotation: v3(0, 0, q(0.5)),
+      half: v3(3, 0.3, HALF_DEPTH),
+      position: v3(-4, FUNNEL_Y, 0),
+      rotation: v3(0, 0, q(-0.4)),
       ...funnel,
     },
     {
       kind: "cuboid",
       role: "funnel",
-      half: v3(4, 0.3, HALF_DEPTH),
-      position: v3(2.6, FUNNEL_Y, 0),
-      rotation: v3(0, 0, q(-0.5)),
+      half: v3(3, 0.3, HALF_DEPTH),
+      position: v3(4, FUNNEL_Y, 0),
+      rotation: v3(0, 0, q(0.4)),
       ...funnel,
     },
   ];
