@@ -1,3 +1,5 @@
+import { generateCourse, type CourseSpec } from "./course";
+
 export type MarbleId = "red" | "blue" | "green" | "yellow" | "purple";
 
 export type Marble = {
@@ -7,35 +9,11 @@ export type Marble = {
   glow: string;
 };
 
-export type TrackFeatureKind =
-  | "loop"
-  | "portal"
-  | "bumper"
-  | "spinner";
-
-export type TrackFeature = {
-  id: string;
-  kind: TrackFeatureKind;
-  x: number;
-  y: number;
-  z: number;
-  rotation: number;
-};
-
-export type TrackPoint = {
-  x: number;
-  y: number;
-  z: number;
-};
-
 export type DailyPuzzle = {
   dateKey: string;
   seed: string;
   marbles: Marble[];
-  finishOrder: MarbleId[];
-  trackPoints: TrackPoint[];
-  trackFeatures: TrackFeature[];
-  raceDurationSeconds: number;
+  courseSpec: CourseSpec;
 };
 
 export type MarbleScore = {
@@ -79,24 +57,20 @@ export function getNewYorkDateKey(date = new Date()) {
   return `${year}-${month}-${day}`;
 }
 
+/**
+ * The daily puzzle no longer carries a predetermined finish order — that now emerges from
+ * the physics simulation of `courseSpec` (see src/lib/physics.ts `simulateRace`). This just
+ * pins the deterministic daily seed and the procedurally generated course everyone shares.
+ */
 export function getDailyPuzzle(date = new Date()): DailyPuzzle {
   const dateKey = getNewYorkDateKey(date);
   const seed = `marbledle-${dateKey}`;
-  const random = createSeededRandom(seed);
-  const finishOrder = shuffle(
-    MARBLES.map((marble) => marble.id),
-    random,
-  );
-  const trackPoints = createTrackPoints(random);
 
   return {
     dateKey,
     seed,
     marbles: MARBLES,
-    finishOrder,
-    trackPoints,
-    trackFeatures: createTrackFeatures(random, trackPoints),
-    raceDurationSeconds: 30 + Math.round(random() * 15),
+    courseSpec: generateCourse(seed),
   };
 }
 
@@ -124,17 +98,6 @@ export function getGuessValidation(guess: PositionGuess) {
     hasDuplicates: uniquePositions.size !== positions.length,
     isValid: positions.length === MARBLES.length && uniquePositions.size === positions.length,
   };
-}
-
-export function getMarbleRaceDuration(
-  puzzle: DailyPuzzle,
-  marbleId: MarbleId,
-) {
-  const finishIndex = puzzle.finishOrder.indexOf(marbleId);
-  const finalGap = 1.05;
-  const leadGap = (puzzle.finishOrder.length - 1 - finishIndex) * finalGap;
-
-  return Math.max(24, puzzle.raceDurationSeconds - leadGap);
 }
 
 export function scoreGuess(guess: MarbleId[], actual: MarbleId[]): ScoreResult {
@@ -166,50 +129,6 @@ export function getMarbleById(id: MarbleId) {
   return marble;
 }
 
-function createTrackPoints(random: () => number): TrackPoint[] {
-  const points: TrackPoint[] = [{ x: 0, y: 3, z: 0 }];
-
-  for (let index = 1; index < 18; index += 1) {
-    const drift = Math.sin(index * 0.9) * 4.8;
-    const sweep = Math.cos(index * 0.62) * 4.4;
-
-    points.push({
-      x: roundToTenth(clamp(drift + (random() * 7 - 3.5), -9.5, 9.5)),
-      y: roundToTenth(3 - index * 3.35),
-      z: roundToTenth(clamp(sweep + (random() * 7 - 3.5), -9.5, 9.5)),
-    });
-  }
-
-  points.push({ x: 0, y: -59, z: 0 });
-
-  return points;
-}
-
-function createTrackFeatures(
-  random: () => number,
-  trackPoints: TrackPoint[],
-): TrackFeature[] {
-  const kinds: TrackFeatureKind[] = [
-    "loop",
-    "portal",
-    "bumper",
-    "spinner",
-  ];
-
-  return Array.from({ length: 12 }, (_, index) => {
-    const point = trackPoints[2 + index];
-
-    return {
-      id: `feature-${index}`,
-      kind: kinds[Math.floor(random() * kinds.length)],
-      x: roundToTenth(point.x + (random() * 4 - 2)),
-      y: roundToTenth(point.y),
-      z: roundToTenth(point.z + (random() * 4 - 2)),
-      rotation: round(random() * 360),
-    };
-  });
-}
-
 function getMaxPositionError(length: number) {
   const normal = Array.from({ length }, (_, index) => index);
   const reversed = [...normal].reverse();
@@ -218,17 +137,6 @@ function getMaxPositionError(length: number) {
     (sum, position, index) => sum + Math.abs(position - reversed[index]),
     0,
   );
-}
-
-function shuffle<T>(items: T[], random: () => number) {
-  const copy = [...items];
-
-  for (let index = copy.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [copy[index], copy[swapIndex]] = [copy[swapIndex], copy[index]];
-  }
-
-  return copy;
 }
 
 export function createSeededRandom(seed: string) {
@@ -246,16 +154,4 @@ export function createSeededRandom(seed: string) {
     value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
     return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
-}
-
-function clamp(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function round(value: number) {
-  return Math.round(value);
-}
-
-function roundToTenth(value: number) {
-  return Math.round(value * 10) / 10;
 }
