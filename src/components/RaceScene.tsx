@@ -61,10 +61,10 @@ export function RaceScene({
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#040712");
-    scene.fog = new THREE.Fog("#050814", 14, 86);
+    scene.fog = new THREE.Fog("#050814", 24, 150);
 
-    const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 240);
-    camera.position.set(0, 8, 26);
+    const camera = new THREE.PerspectiveCamera(64, 1, 0.1, 280);
+    camera.position.set(0, 10, 34);
 
     scene.add(new THREE.AmbientLight("#b7c9ff", 1.25));
     const keyLight = new THREE.DirectionalLight("#ffffff", 2);
@@ -116,15 +116,18 @@ export function RaceScene({
 
     const { dt, frameCount } = trajectory;
     const lastFrame = Math.max(frameCount - 1, 0);
+    const startY = Math.max(...spec.marbleStarts.map((start) => start.position.y));
     const quatA = new THREE.Quaternion();
     const quatB = new THREE.Quaternion();
     const centroid = new THREE.Vector3();
     const leader = new THREE.Vector3();
-    const previousLeader = new THREE.Vector3();
-    const travelDirection = new THREE.Vector3(0, -1, 0);
-    const ahead = new THREE.Vector3();
     const target = new THREE.Vector3();
+    const smoothedTarget = new THREE.Vector3();
     const desired = new THREE.Vector3();
+    const smoothedPosition = new THREE.Vector3();
+    const lightTarget = new THREE.Vector3();
+    let previousCameraNow = performance.now();
+    let cameraInitialized = false;
 
     const sampleTrack = (frames: number[], frameFloat: number, mesh: THREE.Mesh) => {
       const i = Math.min(Math.floor(frameFloat), lastFrame);
@@ -132,13 +135,27 @@ export function RaceScene({
       const t = frameFloat - i;
       const bi = i * 7;
       const bj = j * 7;
-      mesh.position.set(
-        frames[bi] + (frames[bj] - frames[bi]) * t,
-        frames[bi + 1] + (frames[bj + 1] - frames[bi + 1]) * t,
-        frames[bi + 2] + (frames[bj + 2] - frames[bi + 2]) * t,
-      );
-      quatA.set(frames[bi + 3], frames[bi + 4], frames[bi + 5], frames[bi + 6]);
-      quatB.set(frames[bj + 3], frames[bj + 4], frames[bj + 5], frames[bj + 6]);
+      const px = frames[bi] + (frames[bj] - frames[bi]) * t;
+      const py = frames[bi + 1] + (frames[bj + 1] - frames[bi + 1]) * t;
+      const pz = frames[bi + 2] + (frames[bj + 2] - frames[bi + 2]) * t;
+      const qax = frames[bi + 3];
+      const qay = frames[bi + 4];
+      const qaz = frames[bi + 5];
+      const qaw = frames[bi + 6];
+      const qbx = frames[bj + 3];
+      const qby = frames[bj + 4];
+      const qbz = frames[bj + 5];
+      const qbw = frames[bj + 6];
+
+      if (![px, py, pz, qax, qay, qaz, qaw, qbx, qby, qbz, qbw].every(Number.isFinite)) {
+        mesh.visible = false;
+        return;
+      }
+
+      mesh.visible = true;
+      mesh.position.set(px, py, pz);
+      quatA.set(qax, qay, qaz, qaw);
+      quatB.set(qbx, qby, qbz, qbw);
       mesh.quaternion.slerpQuaternions(quatA, quatB, t);
     };
 
@@ -153,47 +170,100 @@ export function RaceScene({
       return 0;
     };
 
-    const updateCamera = () => {
+    const updateCamera = (now: number, frameFloat: number) => {
       centroid.set(0, 0, 0);
       leader.set(0, Number.POSITIVE_INFINITY, 0);
       let lowestY = Number.POSITIVE_INFINITY;
       let highestY = Number.NEGATIVE_INFINITY;
+      let activeCount = 0;
 
       for (const mesh of marbleMeshes) {
+        if (mesh.position.y <= spec.finishY - 1.5) {
+          continue;
+        }
         centroid.add(mesh.position);
         if (mesh.position.y < leader.y) {
           leader.copy(mesh.position);
         }
         lowestY = Math.min(lowestY, mesh.position.y);
         highestY = Math.max(highestY, mesh.position.y);
+        activeCount += 1;
       }
 
-      const n = Math.max(marbleMeshes.length, 1);
+      if (activeCount === 0) {
+        for (const mesh of marbleMeshes) {
+          centroid.add(mesh.position);
+          if (mesh.position.y < leader.y) {
+            leader.copy(mesh.position);
+          }
+          lowestY = Math.min(lowestY, mesh.position.y);
+          highestY = Math.max(highestY, mesh.position.y);
+        }
+        activeCount = marbleMeshes.length;
+      }
+
+      const n = Math.max(activeCount, 1);
       centroid.divideScalar(n);
 
-      travelDirection.copy(leader).sub(previousLeader);
-      if (travelDirection.lengthSq() < 0.0001) {
-        travelDirection.set(0, -1, 0);
-      } else {
-        travelDirection.normalize();
-      }
-      previousLeader.copy(leader);
-
       const packSpread = Math.max(0, highestY - lowestY);
-      ahead.copy(travelDirection).multiplyScalar(2.2);
-      target.copy(centroid).add(ahead);
-      target.y -= 0.9;
-      desired.copy(leader);
-      desired.addScaledVector(travelDirection, -5.6);
-      desired.y += 4.2 + Math.min(packSpread * 0.08, 2.2);
-      desired.z += 18 + Math.min(packSpread * 0.16, 5);
-      desired.x = THREE.MathUtils.clamp(desired.x, -8, 8);
+      const guidedY = THREE.MathUtils.lerp(
+        startY,
+        spec.finishY,
+        easeInOut(clamp(frameFloat / Math.max(lastFrame, 1), 0, 1)),
+      );
+      const rawFocusY = THREE.MathUtils.lerp(centroid.y, lowestY, 0.12);
+      const focusY = THREE.MathUtils.lerp(
+        guidedY,
+        THREE.MathUtils.clamp(rawFocusY, guidedY - 10, guidedY + 10),
+        0.35,
+      );
+      const focusX = THREE.MathUtils.clamp(centroid.x * 0.35, -2.8, 2.8);
+      const rawDeltaSeconds = (now - previousCameraNow) / 1000;
+      const deltaSeconds = Number.isFinite(rawDeltaSeconds)
+        ? clamp(rawDeltaSeconds, 1 / 120, 0.12)
+        : 1 / 60;
+      const targetSmoothing = 1 - Math.exp(-deltaSeconds * 3.2);
+      const positionSmoothing = 1 - Math.exp(-deltaSeconds * 2.4);
+      const fovSmoothing = 1 - Math.exp(-deltaSeconds * 2.1);
 
-      camera.fov = THREE.MathUtils.lerp(camera.fov, 56 + Math.min(packSpread, 18) * 0.45, 0.05);
+      previousCameraNow = now;
+      target.set(focusX, focusY - 3.2, 0);
+      desired.set(
+        THREE.MathUtils.clamp(focusX * 0.2, -2.2, 2.2),
+        focusY + 7.4 + Math.min(packSpread * 0.04, 2.4),
+        46 + Math.min(packSpread * 0.08, 5),
+      );
+
+      if (!isFiniteVector(target)) {
+        target.set(0, guidedY - 3.2, 0);
+      }
+      if (!isFiniteVector(desired)) {
+        desired.set(0, guidedY + 7.4, 46);
+      }
+
+      if (!cameraInitialized || !isFiniteVector(smoothedTarget) || !isFiniteVector(smoothedPosition)) {
+        smoothedTarget.copy(target);
+        smoothedPosition.copy(desired);
+        camera.position.copy(desired);
+        cameraInitialized = true;
+      } else {
+        smoothedTarget.lerp(target, targetSmoothing);
+        smoothedPosition.lerp(desired, positionSmoothing);
+      }
+
+      camera.position.copy(smoothedPosition);
+      camera.fov = THREE.MathUtils.lerp(
+        camera.fov,
+        58 + Math.min(packSpread, 26) * 0.18,
+        fovSmoothing,
+      );
       camera.updateProjectionMatrix();
-      camera.position.lerp(desired, raceStateRef.current === "racing" ? 0.1 : 0.06);
-      camera.lookAt(target);
-      leaderLight.position.copy(leader).add(new THREE.Vector3(0, 3, 4));
+      camera.lookAt(smoothedTarget);
+      if (!isFiniteVector(camera.position)) {
+        camera.position.copy(desired);
+      }
+      lightTarget.copy(leader).add(new THREE.Vector3(0, 3, 4));
+      leaderLight.position.lerp(lightTarget, Math.max(targetSmoothing, 0.08));
     };
 
     const updateStartGate = (now: number) => {
@@ -224,7 +294,7 @@ export function RaceScene({
       }
       debugGroup.visible = debugRef.current;
       updateStartGate(now);
-      updateCamera();
+      updateCamera(now, frameFloat);
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(renderFrame);
     };
@@ -298,4 +368,14 @@ function clamp(value: number, min: number, max: number) {
 
 function easeOut(value: number) {
   return 1 - Math.pow(1 - value, 3);
+}
+
+function easeInOut(value: number) {
+  return value < 0.5
+    ? 2 * value * value
+    : 1 - Math.pow(-2 * value + 2, 2) / 2;
+}
+
+function isFiniteVector(vector: THREE.Vector3) {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
 }

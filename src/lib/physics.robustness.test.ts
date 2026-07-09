@@ -16,7 +16,8 @@ describe("simulateRace robustness sweep", () => {
 
         expect(race.valid, dateKey).toBe(true);
         expect([...race.finishOrder].sort(), dateKey).toEqual(marbleIds);
-        expect(race.durationSeconds, dateKey).toBeGreaterThan(0);
+        expect(race.durationSeconds, dateKey).toBeGreaterThanOrEqual(30);
+        expect(race.durationSeconds, dateKey).toBeLessThanOrEqual(60);
         expect(race.trajectory.frameCount, dateKey).toBe(
           Math.round(race.durationSeconds / race.trajectory.dt),
         );

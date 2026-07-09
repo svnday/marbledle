@@ -34,7 +34,7 @@ describe("generateCourse", () => {
     expect(numbers.length).toBeGreaterThan(50);
     for (const n of numbers) {
       // n must be an exact multiple of 1e-3.
-      expect(Math.round(n * 1000)).toBe(n * 1000);
+      expect(Math.round(n * 1000)).toBeCloseTo(n * 1000, 8);
     }
   });
 

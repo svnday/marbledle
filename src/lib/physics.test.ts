@@ -38,7 +38,8 @@ describe("simulateRace", () => {
 
     expect(race.valid).toBe(true);
     expect([...race.finishOrder].sort()).toEqual(marbleIds);
-    expect(race.durationSeconds).toBeGreaterThan(0);
+    expect(race.durationSeconds).toBeGreaterThanOrEqual(30);
+    expect(race.durationSeconds).toBeLessThanOrEqual(60);
     expect(race.trajectory.frameCount).toBe(Math.round(race.durationSeconds * 60));
   }, 30000);
 
@@ -55,6 +56,8 @@ describe("simulateRace", () => {
       const race = await simulateRace(generateCourse(seed));
       expect(race.valid).toBe(true);
       expect([...race.finishOrder].sort()).toEqual(marbleIds);
+      expect(race.durationSeconds).toBeGreaterThanOrEqual(30);
+      expect(race.durationSeconds).toBeLessThanOrEqual(60);
     }
   }, 60000);
 });

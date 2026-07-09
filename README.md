@@ -13,7 +13,8 @@ procedurally generates:
 The pack is then dropped into a **deterministic physics simulation** (Rapier). Marbles
 collide with each other and with the obstacles, so the finishing order **emerges** from the
 race - and because the simulation is cross-platform deterministic, every player gets the
-byte-identical race for that day.
+byte-identical race for that day. Valid daily races are constrained to finish between 30
+and 60 seconds.
 
 Players assign each marble a guessed finishing position from 1 to 5, submit once, then watch
 the recorded race replay. Results stay hidden until the race finishes. Scoring is based on
@@ -27,7 +28,8 @@ total position error: a perfect order is 100%, and the exact reverse order is 0%
 2. **Precompute** (`src/lib/physics.ts`) - on load, the course is simulated headlessly at a
    fixed timestep until every marble crosses the finish sensor. This records the emergent
    `finishOrder`, a per-step replay `trajectory`, and the race duration. If a procedurally
-   generated course turns out to be unwinnable, the seed is salted and regenerated.
+   generated course turns out to be too short, too long, or unwinnable, the seed is salted
+   and regenerated. A deterministic anti-stall flow nudges parked marbles back into motion.
 3. **Replay** (`src/components/RaceScene.tsx`) - the course meshes are built from the *same*
    spec as the colliders (so what you see is exactly what collided), and the marbles/spinners
    are animated from the recorded trajectory. The scored answer therefore always matches the

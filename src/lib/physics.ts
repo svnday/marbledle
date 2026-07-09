@@ -22,8 +22,11 @@ import {
 import type { MarbleId } from "./game";
 
 const DT = 1 / 60;
-const MAX_STEPS = 60 * 60; // 60s budget; a marble slower than this is "stuck"
-const MAX_ATTEMPTS = 16; // reseed budget before we accept a best-effort result
+const MIN_RACE_SECONDS = 30;
+const MAX_RACE_SECONDS = 60;
+const MAX_STEPS = MAX_RACE_SECONDS / DT; // budget before a marble is considered stuck
+const MIN_RACE_STEPS = MIN_RACE_SECONDS / DT;
+const MAX_ATTEMPTS = 64; // reseed budget before we accept a best-effort result
 
 /** Per-body recorded motion: `frames` is frameCount * 7 floats [x,y,z, qx,qy,qz,qw]. */
 export type BodyTrack = {
@@ -145,6 +148,9 @@ export function buildWorld(RAPIER: Rapier, spec: CourseSpec) {
         .setTranslation(start.position.x, start.position.y, start.position.z)
         .setLinvel(start.linvel.x, start.linvel.y, start.linvel.z)
         .setAngvel(start.angvel)
+        .setLinearDamping(0.28)
+        .setAngularDamping(0.22)
+        .setCanSleep(false)
         .setCcdEnabled(true),
     );
     // Uniform density -> uniform mass (same radius for all), so no marble has an advantage.
@@ -168,6 +174,39 @@ function isOutOfBounds(p: Vec3, spec: CourseSpec): boolean {
   );
 }
 
+function signedHashUnit(step: number, salt: number): number {
+  const hash = (Math.imul(step + 1, 1664525) + Math.imul(salt + 17, 1013904223)) >>> 0;
+  return (hash % 2001) / 1000 - 1;
+}
+
+function applyAntiStallFlow(body: RigidBody, step: number, marbleIndex: number) {
+  const vel = body.linvel();
+  if (vel.y < -1.35) {
+    return;
+  }
+
+  const strength = vel.y > -0.2 ? 1 : 0.45;
+  body.addForce(
+    {
+      x: signedHashUnit(step, marbleIndex) * 1.8 * strength,
+      y: -3.8 * strength,
+      z: signedHashUnit(step, marbleIndex + 29) * 0.9 * strength,
+    },
+    true,
+  );
+
+  if (vel.y > -0.08 && step % 45 === (marbleIndex * 7) % 45) {
+    body.applyImpulse(
+      {
+        x: signedHashUnit(step, marbleIndex + 53) * 0.08,
+        y: -0.18,
+        z: signedHashUnit(step, marbleIndex + 71) * 0.04,
+      },
+      true,
+    );
+  }
+}
+
 /** Run one course to completion (or budget). Frees the Rapier world before returning. */
 function runSimulation(RAPIER: Rapier, spec: CourseSpec) {
   const { world, marbles, spinners } = buildWorld(RAPIER, spec);
@@ -184,6 +223,12 @@ function runSimulation(RAPIER: Rapier, spec: CourseSpec) {
   let steps = 0;
 
   for (; steps < MAX_STEPS; steps += 1) {
+    marbleIds.forEach((id, i) => {
+      if (!finishAt.has(id)) {
+        applyAntiStallFlow(marbles.get(id)!, steps, i);
+      }
+    });
+
     world.step();
 
     marbleIds.forEach((id, i) => {
@@ -225,7 +270,11 @@ function runSimulation(RAPIER: Rapier, spec: CourseSpec) {
     .filter((id) => !finishAt.has(id))
     .sort((a, b) => minY.get(a)! - minY.get(b)!);
 
-  const valid = unfinished.length === 0 && !escaped;
+  const valid =
+    unfinished.length === 0 &&
+    !escaped &&
+    frameCount >= MIN_RACE_STEPS &&
+    frameCount <= MAX_STEPS;
   world.free();
 
   return {
@@ -240,7 +289,8 @@ function runSimulation(RAPIER: Rapier, spec: CourseSpec) {
  * Simulate the daily race for `spec`. If the course is invalid, salt the seed
  * (`seed#1`, `seed#2`, ...) and regenerate, up to MAX_ATTEMPTS. Returns the spec that
  * actually produced the race (render that one), the emergent finish order, and the
- * replay trajectory. Loads (and memoizes) the deterministic Rapier build internally.
+ * replay trajectory. A valid race must finish all five marbles in 30-60 seconds.
+ * Loads (and memoizes) the deterministic Rapier build internally.
  */
 export async function simulateRace(spec: CourseSpec): Promise<RaceResult> {
   const RAPIER = await getRapier();

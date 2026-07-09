@@ -102,11 +102,11 @@ export type CourseSpec = {
 const HALF_WIDTH = 6; // shaft spans x in [-6, 6]
 const HALF_DEPTH = 3; // shaft spans z in [-3, 3]
 const WALL_THICKNESS = 0.5;
-const TOP_Y = 1;
-const LAYER_COUNT = 9;
-const LAYER_SPACING = 6.5;
+const TOP_Y = 2;
+const LAYER_COUNT = 22;
+const LAYER_SPACING = 5.4;
 const FIRST_LAYER_Y = -6;
-const FUNNEL_Y = FIRST_LAYER_Y - LAYER_COUNT * LAYER_SPACING - 4; // below the last layer
+const FUNNEL_Y = FIRST_LAYER_Y - LAYER_COUNT * LAYER_SPACING - 5; // below the last layer
 const SENSOR_Y = FUNNEL_Y - 3;
 const FLOOR_Y = SENSOR_Y - 2.5;
 const MARBLE_RADIUS = 0.5;
@@ -128,10 +128,6 @@ function range(random: () => number, min: number, max: number): number {
 
 function jitter(random: () => number, amp: number): number {
   return q((random() * 2 - 1) * amp);
-}
-
-function pick<T>(random: () => number, items: readonly T[]): T {
-  return items[Math.floor(random() * items.length)];
 }
 
 // --- Builders --------------------------------------------------------------------------
@@ -187,78 +183,76 @@ function buildShell(): CuboidSpec[] {
   ];
 }
 
-/** One seeded obstacle layer at height `y`. Layer type is chosen from the catalog. */
+/** One seeded obstacle layer at height `y`. Every layer is compound so there are no long empty drops. */
 function buildLayer(random: () => number, y: number): CourseElement[] {
-  const kind = pick(random, ["pegs", "spinner", "bumpers", "ramp", "divider"] as const);
+  const elements: CourseElement[] = [];
+  const rowCount = 1 + Math.floor(random() * 2);
 
-  if (kind === "pegs") {
-    const count = 3 + Math.floor(random() * 3); // 3..5 pegs
-    const spacing = q((2 * HALF_WIDTH) / (count + 1));
-    return Array.from({ length: count }, (_, i): PegSpec => ({
-      kind: "peg",
-      radius: range(random, 0.45, 0.7),
-      halfHeight: HALF_DEPTH,
-      position: v3(-HALF_WIDTH + spacing * (i + 1) + jitter(random, 0.4), y, 0),
-      // Lay the cylinder across the shaft depth (rotate its Y axis onto Z).
-      rotation: v3(q(Math.PI / 2), 0, 0),
-      restitution: 0.4,
-      friction: 0.3,
-    }));
+  for (let row = 0; row < rowCount; row += 1) {
+    const pegCount = 3 + row + Math.floor(random() * 2);
+    const pegSpacing = q((2 * HALF_WIDTH) / (pegCount + 1));
+    const rowY = y + (row - (rowCount - 1) / 2) * 1.65 + jitter(random, 0.28);
+    const rowOffset = row % 2 === 0 ? 0 : pegSpacing * 0.45;
+
+    for (let i = 0; i < pegCount; i += 1) {
+      elements.push({
+        kind: "peg",
+        radius: range(random, 0.24, 0.38),
+        halfHeight: HALF_DEPTH,
+        position: v3(
+          -HALF_WIDTH + pegSpacing * (i + 1) + rowOffset + jitter(random, 0.28),
+          rowY,
+          0,
+        ),
+        // Lay the cylinder across the shaft depth (rotate its Y axis onto Z).
+        rotation: v3(q(Math.PI / 2), 0, 0),
+        restitution: 0.72,
+        friction: 0.12,
+      });
+    }
   }
 
-  if (kind === "spinner") {
-    const dir = random() < 0.5 ? -1 : 1;
-    return [
-      {
-        kind: "spinner",
-        half: v3(range(random, 2.5, 4), 0.25, 0.4),
-        position: v3(jitter(random, 1.5), y, 0),
-        angularVelocity: q(dir * range(random, 1, 2.2)),
-        restitution: 0.5,
-        friction: 0.3,
-      },
-    ];
-  }
-
-  if (kind === "bumpers") {
-    const count = 2 + Math.floor(random() * 2); // 2..3 bumpers
-    const spacing = q((2 * HALF_WIDTH) / (count + 1));
-    return Array.from({ length: count }, (_, i): BumperSpec => ({
+  const bumperCount = 2 + Math.floor(random() * 2);
+  for (let i = 0; i < bumperCount; i += 1) {
+    elements.push({
       kind: "bumper",
-      radius: range(random, 0.6, 0.9),
-      position: v3(-HALF_WIDTH + spacing * (i + 1) + jitter(random, 0.5), y, jitter(random, 1)),
-      restitution: 0.9,
-      friction: 0.2,
-    }));
+      radius: range(random, 0.58, 0.9),
+      position: v3(
+        range(random, -HALF_WIDTH + 1.2, HALF_WIDTH - 1.2),
+        y + range(random, -1.8, 1.8),
+        jitter(random, 1.4),
+      ),
+      restitution: 1.05,
+      friction: 0.16,
+    });
   }
 
-  if (kind === "ramp") {
+  if (random() < 0.28) {
     const dir = random() < 0.5 ? -1 : 1;
-    return [
-      {
-        kind: "cuboid",
-        role: "ramp",
-        half: v3(range(random, 3.5, 4.5), 0.3, HALF_DEPTH),
-        position: v3(jitter(random, 1.2), y, 0),
-        rotation: v3(0, 0, q(dir * range(random, 0.3, 0.5))),
-        restitution: 0.2,
-        friction: 0.5,
-      },
-    ];
+    elements.push({
+      kind: "spinner",
+      half: v3(range(random, 1.4, 2.6), 0.18, range(random, 0.55, 1.2)),
+      position: v3(jitter(random, 1.4), y + jitter(random, 1), 0),
+      angularVelocity: q(dir * range(random, 1.2, 2.7)),
+      restitution: 0.65,
+      friction: 0.3,
+    });
   }
 
-  // divider: a vertical fin that splits the falling pack into two lanes
-  return [
-    {
+  if (random() < 0.12) {
+    const laneBias = random() < 0.5 ? -1 : 1;
+    elements.push({
       kind: "cuboid",
-      role: "divider",
-      half: v3(0.3, range(random, 1.5, 2.5), HALF_DEPTH),
-      position: v3(jitter(random, 2), y, 0),
-      rotation: v3(0, 0, 0),
-      restitution: 0.3,
-      friction: 0.4,
-    },
-  ];
+      role: "ramp",
+      half: v3(range(random, 1.1, 1.8), 0.16, HALF_DEPTH),
+      position: v3(laneBias * range(random, 1.8, 2.8), y + jitter(random, 1.1), 0),
+      rotation: v3(0, 0, q(laneBias * range(random, 0.32, 0.5))),
+      restitution: 0.42,
+      friction: 0.28,
+    });
+  }
+
+  return elements;
 }
 
 /**
@@ -329,13 +323,13 @@ export function generateCourse(seed: string): CourseSpec {
 
   return {
     seed,
-    gravity: v3(0, -9.81, 0),
+    gravity: v3(0, -8.2, 0),
     bounds: {
       min: v3(-(HALF_WIDTH + 3), FLOOR_Y - 5, -(HALF_DEPTH + 3)),
       max: v3(HALF_WIDTH + 3, TOP_Y + 6, HALF_DEPTH + 3),
     },
     finishY: q(SENSOR_Y),
-    marble: { radius: MARBLE_RADIUS, restitution: 0.3, friction: 0.4 },
+    marble: { radius: MARBLE_RADIUS, restitution: 0.45, friction: 0.42 },
     marbleStarts: buildMarbleStarts(random),
     elements,
   };
