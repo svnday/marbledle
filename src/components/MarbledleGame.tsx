@@ -18,6 +18,7 @@ import {
   scoreGuess,
 } from "@/lib/game";
 import type { RaceResult } from "@/lib/physics";
+import { RaceScene } from "@/components/RaceScene";
 
 type RaceState = "guessing" | "racing" | "finished";
 
@@ -172,9 +173,17 @@ export function MarbledleGame() {
 
         <section className="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="relative min-h-[780px] overflow-hidden rounded-lg border border-cyan-300/20 bg-[#050814] shadow-2xl shadow-cyan-950/30">
-            <RacePlaceholder isReady={isReady} raceState={raceState} />
+            {race ? (
+              <RaceScene
+                spec={race.spec}
+                trajectory={race.trajectory}
+                raceState={raceState}
+              />
+            ) : (
+              <RacePlaceholder isReady={isReady} raceState={raceState} />
+            )}
             <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
-              Chase camera
+              Follow camera
             </div>
           </div>
 

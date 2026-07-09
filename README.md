@@ -1,32 +1,52 @@
 # Marbledle
 
-Marbledle is a daily marble-race guessing game built for a browser-first prototype and a future Discord Activity/App surface.
+Marbledle is a daily marble-race prediction game — a browser-first take on *Marbles on
+Stream*, where the finishing order is decided by **real physics**, not scripted in advance.
 
-Each day, using the `America/New_York` date, the app generates:
+Each day, from the `America/New_York` date, the app derives a deterministic seed and
+procedurally generates:
 
-- a deterministic daily seed
-- a five-marble finish order
-- a 3D track path
-- 3D track features like loops, portals, bumpers, and spinners
-- a 30-45 second race duration
+- an **enclosed 3D course** (a descending shaft of funnels, pachinko pegs, spinners,
+  bumpers, ramps and dividers), and
+- five marbles with seeded starting positions and spin.
 
-Players assign each marble a guessed finishing position from 1 to 5, submit once, then watch the marbles drop down the same generated 3D track everyone else gets. Results remain hidden until the race finishes. Scoring is based on total position error: a perfect order is 100%, and the exact reverse order is 0%.
+The pack is then dropped into a **deterministic physics simulation** (Rapier). Marbles
+collide with each other and with the obstacles, so the finishing order **emerges** from the
+race — and because the simulation is cross-platform deterministic, every player gets the
+byte-identical race for that day.
 
-## Project Foundation
+Players assign each marble a guessed finishing position from 1 to 5, submit once, then watch
+the recorded race replay. Results stay hidden until the race finishes. Scoring is based on
+total position error: a perfect order is 100%, and the exact reverse order is 0%.
 
-- Next.js App Router
-- TypeScript
-- Tailwind CSS
-- Three.js
-- Deterministic game logic in `src/lib/game.ts`
-- Client game surface in `src/components/MarbledleGame.tsx`
-- Dark-mode browser surface
-- Browser-side daily puzzle generation to avoid freezing the daily race at deploy time
+## How the daily race is produced
 
-## Local Development
+1. **Generate** (`src/lib/course.ts`) — the seed builds a `CourseSpec`: plain data describing
+   every collider. All numbers are quantized to a 1e-3 grid so cross-engine float differences
+   can't leak in. This one spec is the single source of truth for both physics and rendering.
+2. **Precompute** (`src/lib/physics.ts`) — on load, the course is simulated headlessly at a
+   fixed timestep until every marble crosses the finish sensor. This records the emergent
+   `finishOrder`, a per-step replay `trajectory`, and the race duration. If a procedurally
+   generated course turns out to be unwinnable, the seed is salted and regenerated.
+3. **Replay** (`src/components/RaceScene.tsx`) — the course meshes are built from the *same*
+   spec as the colliders (so what you see is exactly what collided), and the marbles/spinners
+   are animated from the recorded trajectory. The scored answer therefore always matches the
+   visible race.
+
+## Project foundation
+
+- Next.js App Router + TypeScript + Tailwind CSS
+- **three.js** for rendering, **`@dimforge/rapier3d-deterministic-compat`** for deterministic physics
+- Deterministic, engine-free game logic and course generation in `src/lib/` (`game.ts`,
+  `course.ts`), physics simulation in `src/lib/physics.ts`
+- Client game surface in `src/components/MarbledleGame.tsx` + `RaceScene.tsx`
+- Physics runs client-side and is lazy-loaded, so the WASM stays out of the initial bundle
+- Vitest unit tests cover determinism, quantization, and race validity
+
+## Local development
 
 ```bash
-npm run dev
+npm run dev    # start the dev server at http://localhost:3000
+npm test       # run the unit tests
+npm run build  # production build
 ```
-
-Then open `http://localhost:3000`.
