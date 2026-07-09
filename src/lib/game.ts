@@ -18,7 +18,14 @@ export type TrackFeature = {
   kind: TrackFeatureKind;
   x: number;
   y: number;
+  z: number;
   rotation: number;
+};
+
+export type TrackPoint = {
+  x: number;
+  y: number;
+  z: number;
 };
 
 export type DailyPuzzle = {
@@ -26,7 +33,7 @@ export type DailyPuzzle = {
   seed: string;
   marbles: Marble[];
   finishOrder: MarbleId[];
-  trackPath: string;
+  trackPoints: TrackPoint[];
   trackFeatures: TrackFeature[];
   raceDurationSeconds: number;
 };
@@ -56,8 +63,6 @@ export const MARBLES: Marble[] = [
 ];
 
 const NEW_YORK_TIME_ZONE = "America/New_York";
-const TRACK_WIDTH = 420;
-const TRACK_CENTER = TRACK_WIDTH / 2;
 
 export function getNewYorkDateKey(date = new Date()) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -82,14 +87,15 @@ export function getDailyPuzzle(date = new Date()): DailyPuzzle {
     MARBLES.map((marble) => marble.id),
     random,
   );
+  const trackPoints = createTrackPoints(random);
 
   return {
     dateKey,
     seed,
     marbles: MARBLES,
     finishOrder,
-    trackPath: createTrackPath(random),
-    trackFeatures: createTrackFeatures(random),
+    trackPoints,
+    trackFeatures: createTrackFeatures(random, trackPoints),
     raceDurationSeconds: 30 + Math.round(random() * 15),
   };
 }
@@ -160,32 +166,29 @@ export function getMarbleById(id: MarbleId) {
   return marble;
 }
 
-function createTrackPath(random: () => number) {
-  let path = `M ${TRACK_CENTER} 28`;
-  let currentX = TRACK_CENTER;
-  let currentY = 28;
+function createTrackPoints(random: () => number): TrackPoint[] {
+  const points: TrackPoint[] = [{ x: 0, y: 3, z: 0 }];
 
-  for (let index = 0; index < 8; index += 1) {
-    const nextY = 126 + index * 104;
-    const nextX = 88 + random() * 244;
-    const controlXOne = clamp(currentX + (random() * 220 - 110), 52, 368);
-    const controlXTwo = clamp(nextX + (random() * 220 - 110), 52, 368);
-    const controlYOne = currentY + 38 + random() * 58;
-    const controlYTwo = nextY - 66 + random() * 58;
+  for (let index = 1; index < 18; index += 1) {
+    const drift = Math.sin(index * 0.9) * 4.8;
+    const sweep = Math.cos(index * 0.62) * 4.4;
 
-    path += ` C ${round(controlXOne)} ${round(controlYOne)}, ${round(
-      controlXTwo,
-    )} ${round(controlYTwo)}, ${round(nextX)} ${round(nextY)}`;
-    currentX = nextX;
-    currentY = nextY;
+    points.push({
+      x: roundToTenth(clamp(drift + (random() * 7 - 3.5), -9.5, 9.5)),
+      y: roundToTenth(3 - index * 3.35),
+      z: roundToTenth(clamp(sweep + (random() * 7 - 3.5), -9.5, 9.5)),
+    });
   }
 
-  path += ` C ${round(currentX)} 910, ${TRACK_CENTER} 926, ${TRACK_CENTER} 952`;
+  points.push({ x: 0, y: -59, z: 0 });
 
-  return path;
+  return points;
 }
 
-function createTrackFeatures(random: () => number): TrackFeature[] {
+function createTrackFeatures(
+  random: () => number,
+  trackPoints: TrackPoint[],
+): TrackFeature[] {
   const kinds: TrackFeatureKind[] = [
     "loop",
     "portal",
@@ -193,13 +196,18 @@ function createTrackFeatures(random: () => number): TrackFeature[] {
     "spinner",
   ];
 
-  return Array.from({ length: 11 }, (_, index) => ({
-    id: `feature-${index}`,
-    kind: kinds[Math.floor(random() * kinds.length)],
-    x: round(62 + random() * 296),
-    y: round(118 + index * 74 + random() * 34),
-    rotation: round(random() * 360),
-  }));
+  return Array.from({ length: 12 }, (_, index) => {
+    const point = trackPoints[2 + index];
+
+    return {
+      id: `feature-${index}`,
+      kind: kinds[Math.floor(random() * kinds.length)],
+      x: roundToTenth(point.x + (random() * 4 - 2)),
+      y: roundToTenth(point.y),
+      z: roundToTenth(point.z + (random() * 4 - 2)),
+      rotation: round(random() * 360),
+    };
+  });
 }
 
 function getMaxPositionError(length: number) {
@@ -246,4 +254,8 @@ function clamp(value: number, min: number, max: number) {
 
 function round(value: number) {
   return Math.round(value);
+}
+
+function roundToTenth(value: number) {
+  return Math.round(value * 10) / 10;
 }
