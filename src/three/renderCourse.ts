@@ -4,23 +4,15 @@ import type {
   BumperSpec,
   CourseSpec,
   CuboidSpec,
+  PathSample,
   PegSpec,
   SensorSpec,
   Vec3,
 } from "@/lib/course";
 
-// Renders a CourseSpec into three.js meshes that mirror the Rapier colliders 1:1 - same
-// primitives, same half-extents, same positions/rotations. Because the physics colliders
-// (src/lib/physics.ts) and these meshes come from the same spec, what you see is exactly
-// what collides. That equivalence is the fix for the old "everything clips through
-// everything" behaviour.
-//
-// Static scenery (walls/floor/pegs/bumpers/ramps/dividers/funnel/finish) is built here.
-// The moving bodies - marbles and spinners - are created here too but positioned every
-// frame by RaceScene from the recorded trajectory, keyed by the same track ids the
-// simulation used ("marble:<id>", "spinner:<elementIndex>").
-
-const HALF_DEPTH_HINT = 3; // front wall sits at +z; hide it so it doesn't occlude the view
+function vector(value: Vec3): THREE.Vector3 {
+  return new THREE.Vector3(value.x, value.y, value.z);
+}
 
 function setTransform(object: THREE.Object3D, position: Vec3, rotation?: Vec3) {
   object.position.set(position.x, position.y, position.z);
@@ -29,40 +21,37 @@ function setTransform(object: THREE.Object3D, position: Vec3, rotation?: Vec3) {
   }
 }
 
-function wallMaterial(spec: CuboidSpec): THREE.MeshStandardMaterial {
-  // The wall nearest the camera (+z) is rendered as faint glass so we can see inside the
-  // shaft; it is still a full collider in the physics world.
-  const isFrontWall = spec.role === "wall" && spec.position.z > HALF_DEPTH_HINT;
-  if (isFrontWall) {
-    return new THREE.MeshStandardMaterial({
-      color: "#0b1220",
-      transparent: true,
-      opacity: 0.05,
-      depthWrite: false,
-    });
-  }
-  return new THREE.MeshStandardMaterial({
-    color: spec.role === "floor" ? "#0b1120" : "#141d31",
-    metalness: 0.2,
-    roughness: 0.6,
-  });
+function orientAlong(mesh: THREE.Object3D, tangent: THREE.Vector3, rightHint: THREE.Vector3) {
+  const z = tangent.clone().normalize();
+  const up = new THREE.Vector3().crossVectors(z, rightHint).normalize();
+  const x = new THREE.Vector3().crossVectors(up, z).normalize();
+  const matrix = new THREE.Matrix4().makeBasis(x, up, z);
+  mesh.quaternion.setFromRotationMatrix(matrix);
 }
 
 function roleMaterial(spec: CuboidSpec): THREE.MeshStandardMaterial {
   switch (spec.role) {
+    case "rail":
+      return new THREE.MeshStandardMaterial({
+        color: "#172554",
+        emissive: "#38bdf8",
+        emissiveIntensity: 0.16,
+        metalness: 0.35,
+        roughness: 0.35,
+      });
+    case "support":
+      return new THREE.MeshStandardMaterial({
+        color: "#111827",
+        metalness: 0.45,
+        roughness: 0.55,
+      });
     case "ramp":
+    case "divider":
       return new THREE.MeshStandardMaterial({
         color: "#1f2a44",
         emissive: "#0e7490",
         emissiveIntensity: 0.15,
         metalness: 0.3,
-        roughness: 0.4,
-      });
-    case "divider":
-      return new THREE.MeshStandardMaterial({
-        color: "#334155",
-        emissive: "#a855f7",
-        emissiveIntensity: 0.2,
         roughness: 0.4,
       });
     case "funnel":
@@ -74,7 +63,11 @@ function roleMaterial(spec: CuboidSpec): THREE.MeshStandardMaterial {
         roughness: 0.35,
       });
     default:
-      return wallMaterial(spec);
+      return new THREE.MeshStandardMaterial({
+        color: "#101a2f",
+        metalness: 0.2,
+        roughness: 0.6,
+      });
   }
 }
 
@@ -86,7 +79,6 @@ function cuboidMesh(spec: CuboidSpec): THREE.Mesh {
 }
 
 function pegMesh(spec: PegSpec): THREE.Mesh {
-  // three cylinder axis is +Y, matching Rapier's cylinder; the spec's rotation lays it flat.
   const geometry = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.halfHeight * 2, 20);
   const material = new THREE.MeshStandardMaterial({
     color: "#67e8f9",
@@ -129,6 +121,65 @@ function sensorMesh(spec: SensorSpec): THREE.Mesh {
   return mesh;
 }
 
+function trackSpanMeshes(a: PathSample, b: PathSample, spec: CourseSpec): THREE.Mesh[] {
+  const start = vector(a.position);
+  const end = vector(b.position);
+  const center = start.clone().add(end).multiplyScalar(0.5);
+  const tangent = end.clone().sub(start);
+  const length = Math.max(tangent.length(), 0.001);
+  const right = vector(a.right).add(vector(b.right)).multiplyScalar(0.5).normalize();
+  const up = new THREE.Vector3().crossVectors(tangent.clone().normalize(), right).normalize();
+
+  const floor = new THREE.Mesh(
+    new THREE.BoxGeometry(spec.path.width, 0.22, length * 1.04),
+    new THREE.MeshStandardMaterial({
+      color: "#0f1b33",
+      emissive: "#0e7490",
+      emissiveIntensity: 0.09,
+      metalness: 0.28,
+      roughness: 0.42,
+    }),
+  );
+  floor.position.copy(center).add(up.clone().multiplyScalar(-0.12));
+  orientAlong(floor, tangent, right);
+
+  const railMaterial = new THREE.MeshStandardMaterial({
+    color: "#172554",
+    emissive: "#38bdf8",
+    emissiveIntensity: 0.16,
+    metalness: 0.35,
+    roughness: 0.35,
+  });
+  const leftRail = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, spec.path.railHeight, length * 1.04),
+    railMaterial,
+  );
+  const rightRail = new THREE.Mesh(
+    new THREE.BoxGeometry(0.26, spec.path.railHeight, length * 1.04),
+    railMaterial.clone(),
+  );
+  const railLift = up.clone().multiplyScalar(spec.path.railHeight / 2);
+  leftRail.position.copy(center).add(right.clone().multiplyScalar(-spec.path.width / 2)).add(railLift);
+  rightRail.position.copy(center).add(right.clone().multiplyScalar(spec.path.width / 2)).add(railLift);
+  orientAlong(leftRail, tangent, right);
+  orientAlong(rightRail, tangent, right);
+
+  return [floor, leftRail, rightRail];
+}
+
+function buildTrackRun(spec: CourseSpec): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "Path track";
+
+  for (let index = 0; index < spec.path.samples.length - 1; index += 1) {
+    trackSpanMeshes(spec.path.samples[index], spec.path.samples[index + 1], spec).forEach((mesh) => {
+      group.add(mesh);
+    });
+  }
+
+  return group;
+}
+
 function wireframeMaterial(color = "#fbbf24"): THREE.MeshBasicMaterial {
   return new THREE.MeshBasicMaterial({
     color,
@@ -141,7 +192,7 @@ function wireframeMaterial(color = "#fbbf24"): THREE.MeshBasicMaterial {
 
 function debugCuboidMesh(spec: CuboidSpec): THREE.Mesh {
   const geometry = new THREE.BoxGeometry(spec.half.x * 2, spec.half.y * 2, spec.half.z * 2);
-  const mesh = new THREE.Mesh(geometry, wireframeMaterial(spec.role === "wall" ? "#fbbf24" : "#38bdf8"));
+  const mesh = new THREE.Mesh(geometry, wireframeMaterial(spec.role === "support" ? "#fbbf24" : "#38bdf8"));
   setTransform(mesh, spec.position, spec.rotation);
   return mesh;
 }
@@ -167,9 +218,21 @@ function debugSensorMesh(spec: SensorSpec): THREE.Mesh {
   return mesh;
 }
 
-/** All non-moving scenery for a course, as one group. */
+function debugPathLine(spec: CourseSpec): THREE.Line {
+  const points = spec.path.samples.map((sample) => vector(sample.position).add(new THREE.Vector3(0, 0.35, 0)));
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: "#facc15",
+    depthTest: false,
+    transparent: true,
+    opacity: 0.9,
+  });
+  return new THREE.Line(geometry, material);
+}
+
 export function buildStaticCourse(spec: CourseSpec): THREE.Group {
   const group = new THREE.Group();
+  group.add(buildTrackRun(spec));
 
   spec.elements.forEach((element) => {
     if (element.kind === "cuboid") {
@@ -181,16 +244,15 @@ export function buildStaticCourse(spec: CourseSpec): THREE.Group {
     } else if (element.kind === "sensor") {
       group.add(sensorMesh(element));
     }
-    // "spinner" is a moving body - see buildSpinnerMeshes.
   });
 
   return group;
 }
 
-/** Dev-only collider overlay. It mirrors the same CourseSpec primitives used by Rapier. */
 export function buildColliderWireframes(spec: CourseSpec): THREE.Group {
   const group = new THREE.Group();
   group.name = "Collider wireframes";
+  group.add(debugPathLine(spec));
 
   spec.elements.forEach((element) => {
     if (element.kind === "cuboid") {
@@ -212,11 +274,11 @@ export function buildColliderWireframes(spec: CourseSpec): THREE.Group {
   return group;
 }
 
-/** Spinner meshes keyed by trajectory track id ("spinner:<elementIndex>"). */
 export function buildSpinnerMeshes(spec: CourseSpec): Map<string, THREE.Mesh> {
   const meshes = new Map<string, THREE.Mesh>();
+  let spinnerIndex = 0;
 
-  spec.elements.forEach((element, index) => {
+  spec.elements.forEach((element) => {
     if (element.kind !== "spinner") {
       return;
     }
@@ -230,13 +292,13 @@ export function buildSpinnerMeshes(spec: CourseSpec): Map<string, THREE.Mesh> {
     });
     const mesh = new THREE.Mesh(geometry, material);
     setTransform(mesh, element.position);
-    meshes.set(`spinner:${index}`, mesh);
+    meshes.set(`spinner:${spinnerIndex}`, mesh);
+    spinnerIndex += 1;
   });
 
   return meshes;
 }
 
-/** Marble meshes keyed by trajectory track id ("marble:<id>"), coloured from MARBLES. */
 export function buildMarbleMeshes(spec: CourseSpec): Map<string, THREE.Mesh> {
   const meshes = new Map<string, THREE.Mesh>();
 

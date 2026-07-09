@@ -38,20 +38,36 @@ describe("generateCourse", () => {
     }
   });
 
-  it("emits exactly one finish sensor and an enclosing shell", () => {
+  it("emits exactly one finish sensor and a path-based contained run", () => {
     const spec = generateCourse("structure");
     const sensors = spec.elements.filter((e) => e.kind === "sensor");
     expect(sensors).toHaveLength(1);
-    expect(spec.elements.filter((e) => e.kind === "cuboid" && e.role === "wall").length).toBe(4);
-    expect(spec.elements.some((e) => e.kind === "cuboid" && e.role === "floor")).toBe(true);
+    expect(spec.path.samples.length).toBeGreaterThan(80);
+    expect(spec.path.segments.map((segment) => segment.kind)).toEqual(
+      expect.arrayContaining(["start", "sweep", "banked-turn", "helix", "pinball", "finish"]),
+    );
+    expect(spec.elements.some((e) => e.kind === "bumper")).toBe(true);
+    expect(spec.elements.some((e) => e.kind === "spinner")).toBe(true);
   });
 
-  it("starts all five marbles, matching the canonical marble ids, above the finish", () => {
+  it("generates a course with lateral movement on more than one axis", () => {
+    const spec = generateCourse("axis-check");
+    const xs = spec.path.samples.map((sample) => sample.position.x);
+    const zs = spec.path.samples.map((sample) => sample.position.z);
+    const ys = spec.path.samples.map((sample) => sample.position.y);
+
+    expect(Math.max(...xs) - Math.min(...xs)).toBeGreaterThan(10);
+    expect(Math.max(...zs) - Math.min(...zs)).toBeGreaterThan(20);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(35);
+  });
+
+  it("starts all five marbles, matching the canonical marble ids, near the first path station", () => {
     const spec: CourseSpec = generateCourse("marbles");
     expect(spec.marbleStarts.map((m) => m.id).sort()).toEqual(
       MARBLES.map((m) => m.id).sort(),
     );
     for (const start of spec.marbleStarts) {
+      expect(start.station).toBeLessThanOrEqual(0.2);
       expect(start.position.y).toBeGreaterThan(spec.finishY);
       expect(start.position.x).toBeGreaterThan(spec.bounds.min.x);
       expect(start.position.x).toBeLessThan(spec.bounds.max.x);

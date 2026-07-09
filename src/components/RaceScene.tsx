@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
-import type { CourseSpec } from "@/lib/course";
+import { sampleCoursePath, type CourseSpec, type Vec3 } from "@/lib/course";
 import type { Trajectory } from "@/lib/physics";
 import {
   buildColliderWireframes,
@@ -116,16 +116,17 @@ export function RaceScene({
 
     const { dt, frameCount } = trajectory;
     const lastFrame = Math.max(frameCount - 1, 0);
-    const startY = Math.max(...spec.marbleStarts.map((start) => start.position.y));
     const quatA = new THREE.Quaternion();
     const quatB = new THREE.Quaternion();
     const centroid = new THREE.Vector3();
-    const leader = new THREE.Vector3();
     const target = new THREE.Vector3();
     const smoothedTarget = new THREE.Vector3();
     const desired = new THREE.Vector3();
     const smoothedPosition = new THREE.Vector3();
     const lightTarget = new THREE.Vector3();
+    const pathFocus = new THREE.Vector3();
+    const pathTangent = new THREE.Vector3();
+    const pathRight = new THREE.Vector3();
     let previousCameraNow = performance.now();
     let cameraInitialized = false;
 
@@ -172,52 +173,28 @@ export function RaceScene({
 
     const updateCamera = (now: number, frameFloat: number) => {
       centroid.set(0, 0, 0);
-      leader.set(0, Number.POSITIVE_INFINITY, 0);
-      let lowestY = Number.POSITIVE_INFINITY;
-      let highestY = Number.NEGATIVE_INFINITY;
-      let activeCount = 0;
+      let packSpread = 0;
 
       for (const mesh of marbleMeshes) {
-        if (mesh.position.y <= spec.finishY - 1.5) {
-          continue;
-        }
         centroid.add(mesh.position);
-        if (mesh.position.y < leader.y) {
-          leader.copy(mesh.position);
-        }
-        lowestY = Math.min(lowestY, mesh.position.y);
-        highestY = Math.max(highestY, mesh.position.y);
-        activeCount += 1;
       }
 
-      if (activeCount === 0) {
-        for (const mesh of marbleMeshes) {
-          centroid.add(mesh.position);
-          if (mesh.position.y < leader.y) {
-            leader.copy(mesh.position);
-          }
-          lowestY = Math.min(lowestY, mesh.position.y);
-          highestY = Math.max(highestY, mesh.position.y);
-        }
-        activeCount = marbleMeshes.length;
-      }
-
-      const n = Math.max(activeCount, 1);
+      const n = Math.max(marbleMeshes.length, 1);
       centroid.divideScalar(n);
+      for (const mesh of marbleMeshes) {
+        packSpread = Math.max(packSpread, mesh.position.distanceTo(centroid));
+      }
 
-      const packSpread = Math.max(0, highestY - lowestY);
-      const guidedY = THREE.MathUtils.lerp(
-        startY,
-        spec.finishY,
-        easeInOut(clamp(frameFloat / Math.max(lastFrame, 1), 0, 1)),
-      );
-      const rawFocusY = THREE.MathUtils.lerp(centroid.y, lowestY, 0.12);
-      const focusY = THREE.MathUtils.lerp(
-        guidedY,
-        THREE.MathUtils.clamp(rawFocusY, guidedY - 10, guidedY + 10),
-        0.35,
-      );
-      const focusX = THREE.MathUtils.clamp(centroid.x * 0.35, -2.8, 2.8);
+      const progress = easeInOut(clamp(frameFloat / Math.max(lastFrame, 1), 0, 1));
+      const guided = sampleCoursePath(spec.path, progress * spec.path.length);
+      const lookAhead = sampleCoursePath(spec.path, Math.min(spec.path.length, guided.station + 8));
+      pathFocus.copy(toVector(guided.position));
+      pathTangent.copy(toVector(lookAhead.position).sub(pathFocus)).normalize();
+      if (pathTangent.lengthSq() < 0.001) {
+        pathTangent.copy(toVector(guided.tangent)).normalize();
+      }
+      pathRight.copy(toVector(guided.right)).normalize();
+      target.copy(pathFocus).lerp(centroid, 0.38).add(pathTangent.clone().multiplyScalar(3));
       const rawDeltaSeconds = (now - previousCameraNow) / 1000;
       const deltaSeconds = Number.isFinite(rawDeltaSeconds)
         ? clamp(rawDeltaSeconds, 1 / 120, 0.12)
@@ -227,18 +204,17 @@ export function RaceScene({
       const fovSmoothing = 1 - Math.exp(-deltaSeconds * 2.1);
 
       previousCameraNow = now;
-      target.set(focusX, focusY - 3.2, 0);
-      desired.set(
-        THREE.MathUtils.clamp(focusX * 0.2, -2.2, 2.2),
-        focusY + 7.4 + Math.min(packSpread * 0.04, 2.4),
-        46 + Math.min(packSpread * 0.08, 5),
-      );
+      desired
+        .copy(target)
+        .add(pathTangent.clone().multiplyScalar(-15 - Math.min(packSpread, 9) * 0.32))
+        .add(pathRight.clone().multiplyScalar(5.2))
+        .add(new THREE.Vector3(0, 7.8 + Math.min(packSpread, 8) * 0.22, 0));
 
       if (!isFiniteVector(target)) {
-        target.set(0, guidedY - 3.2, 0);
+        target.copy(pathFocus);
       }
       if (!isFiniteVector(desired)) {
-        desired.set(0, guidedY + 7.4, 46);
+        desired.copy(pathFocus).add(new THREE.Vector3(0, 9, 18));
       }
 
       if (!cameraInitialized || !isFiniteVector(smoothedTarget) || !isFiniteVector(smoothedPosition)) {
@@ -254,7 +230,7 @@ export function RaceScene({
       camera.position.copy(smoothedPosition);
       camera.fov = THREE.MathUtils.lerp(
         camera.fov,
-        58 + Math.min(packSpread, 26) * 0.18,
+        56 + Math.min(packSpread, 16) * 0.32,
         fovSmoothing,
       );
       camera.updateProjectionMatrix();
@@ -262,7 +238,7 @@ export function RaceScene({
       if (!isFiniteVector(camera.position)) {
         camera.position.copy(desired);
       }
-      lightTarget.copy(leader).add(new THREE.Vector3(0, 3, 4));
+      lightTarget.copy(centroid).add(new THREE.Vector3(0, 3, 4));
       leaderLight.position.lerp(lightTarget, Math.max(targetSmoothing, 0.08));
     };
 
@@ -320,7 +296,7 @@ export function RaceScene({
 }
 
 function buildStartGate(spec: CourseSpec) {
-  const topY = Math.max(...spec.marbleStarts.map((start) => start.position.y));
+  const start = sampleCoursePath(spec.path, 0);
   const group = new THREE.Group();
   const material = new THREE.MeshStandardMaterial({
     color: "#38bdf8",
@@ -337,7 +313,8 @@ function buildStartGate(spec: CourseSpec) {
   const leftGate = new THREE.Mesh(leftGateGeometry, material);
   const rightGate = new THREE.Mesh(rightGateGeometry, material);
 
-  group.position.set(0, topY - 0.9, 2.7);
+  group.position.copy(toVector(start.position)).add(new THREE.Vector3(0, 1.05, 0));
+  orientAlong(group, toVector(start.tangent), toVector(start.right));
   leftPost.position.set(-3.3, 0.1, 0);
   rightPost.position.set(3.3, 0.1, 0);
   leftGate.position.set(-1.55, 0.7, 0);
@@ -347,6 +324,18 @@ function buildStartGate(spec: CourseSpec) {
   group.add(leftPost, rightPost, leftGate, rightGate);
 
   return { gate: group, leftGate, rightGate };
+}
+
+function toVector(value: Vec3): THREE.Vector3 {
+  return new THREE.Vector3(value.x, value.y, value.z);
+}
+
+function orientAlong(object: THREE.Object3D, tangent: THREE.Vector3, rightHint: THREE.Vector3) {
+  const z = tangent.clone().normalize();
+  const up = new THREE.Vector3().crossVectors(z, rightHint).normalize();
+  const x = new THREE.Vector3().crossVectors(up, z).normalize();
+  const matrix = new THREE.Matrix4().makeBasis(x, up, z);
+  object.quaternion.setFromRotationMatrix(matrix);
 }
 
 function disposeObject(object: THREE.Object3D) {

@@ -21,6 +21,16 @@ describe("simulateRace robustness sweep", () => {
         expect(race.trajectory.frameCount, dateKey).toBe(
           Math.round(race.durationSeconds / race.trajectory.dt),
         );
+        expect(race.validation.usedAssist, dateKey).toBe(false);
+        expect(race.validation.failureReason, dateKey).toBeNull();
+        expect(race.validation.maxStallSeconds, dateKey).toBeLessThan(4);
+        expect(race.validation.minProgressPerWindow, dateKey).toBeGreaterThan(1.2);
+        expect(race.spec.path.segments.some((segment) => segment.kind === "helix"), dateKey).toBe(true);
+        expect(
+          Math.max(...race.spec.path.samples.map((sample) => sample.position.x)) -
+            Math.min(...race.spec.path.samples.map((sample) => sample.position.x)),
+          dateKey,
+        ).toBeGreaterThan(10);
       }
     },
     300_000,

@@ -216,6 +216,7 @@ export function MarbledleGame() {
               prefersReducedMotion={prefersReducedMotion}
               raceState={raceState}
               ready={isReady}
+              validation={race?.validation ?? null}
             />
 
             {score ? (
@@ -343,12 +344,14 @@ function StatusPanel({
   prefersReducedMotion,
   raceState,
   ready,
+  validation,
 }: {
   dateKey: string;
   duration: number | null;
   prefersReducedMotion: boolean;
   raceState: RaceState;
   ready: boolean;
+  validation: RaceResult["validation"] | null;
 }) {
   const status = ready
     ? {
@@ -379,6 +382,16 @@ function StatusPanel({
           <dt className="text-slate-500">Motion</dt>
           <dd className="font-bold text-slate-200">
             {prefersReducedMotion ? "Reduced: instant result" : "Animated replay"}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-slate-500">Course check</dt>
+          <dd className="font-bold text-slate-200">
+            {validation
+              ? validation.failureReason === null
+                ? `Playable, no assist (${validation.attempts} attempt${validation.attempts === 1 ? "" : "s"})`
+                : `Failed: ${validation.failureReason}`
+              : "..."}
           </dd>
         </div>
       </dl>

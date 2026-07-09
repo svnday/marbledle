@@ -23,12 +23,13 @@ describe("simulateRace", () => {
     expect(finalFrame(a.trajectory)).toEqual(finalFrame(b.trajectory));
   }, 30000);
 
-  it("stays deterministic through the reseed path (a seed that needs several attempts)", async () => {
+  it("records deterministic validation metrics", async () => {
     const a = await simulateRace(generateCourse("marbledle-2026-07-09"));
     const b = await simulateRace(generateCourse("marbledle-2026-07-09"));
 
     expect(a.attempts).toBe(b.attempts);
     expect(a.seed).toBe(b.seed);
+    expect(a.validation).toEqual(b.validation);
     expect(a.finishOrder).toEqual(b.finishOrder);
     expect(finalFrame(a.trajectory)).toEqual(finalFrame(b.trajectory));
   }, 30000);
@@ -41,6 +42,13 @@ describe("simulateRace", () => {
     expect(race.durationSeconds).toBeGreaterThanOrEqual(30);
     expect(race.durationSeconds).toBeLessThanOrEqual(60);
     expect(race.trajectory.frameCount).toBe(Math.round(race.durationSeconds * 60));
+    expect(race.validation.allFinished).toBe(true);
+    expect(race.validation.durationInRange).toBe(true);
+    expect(race.validation.escaped).toBe(false);
+    expect(race.validation.usedAssist).toBe(false);
+    expect(race.validation.failureReason).toBeNull();
+    expect(race.validation.maxStallSeconds).toBeLessThan(4);
+    expect(race.validation.minProgressPerWindow).toBeGreaterThan(1.2);
   }, 30000);
 
   it("produces an emergent order that differs from the start lineup", async () => {
@@ -58,6 +66,8 @@ describe("simulateRace", () => {
       expect([...race.finishOrder].sort()).toEqual(marbleIds);
       expect(race.durationSeconds).toBeGreaterThanOrEqual(30);
       expect(race.durationSeconds).toBeLessThanOrEqual(60);
+      expect(race.validation.usedAssist).toBe(false);
+      expect(race.validation.failureReason).toBeNull();
     }
   }, 60000);
 });
