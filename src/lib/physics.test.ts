@@ -47,6 +47,8 @@ describe("simulateRace", () => {
     expect(race.validation.escaped).toBe(false);
     expect(race.validation.usedAssist).toBe(false);
     expect(race.validation.failureReason).toBeNull();
+    expect(race.validation.obstacleHits).toBeGreaterThan(3);
+    expect(race.validation.marbleContacts).toBeGreaterThan(0);
     expect(race.validation.maxStallSeconds).toBeLessThan(4);
     expect(race.validation.minProgressPerWindow).toBeGreaterThan(1.2);
   }, 30000);
@@ -68,6 +70,7 @@ describe("simulateRace", () => {
       expect(race.durationSeconds).toBeLessThanOrEqual(60);
       expect(race.validation.usedAssist).toBe(false);
       expect(race.validation.failureReason).toBeNull();
+      expect(race.validation.obstacleHits).toBeGreaterThan(0);
     }
   }, 60000);
 });

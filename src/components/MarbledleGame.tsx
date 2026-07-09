@@ -394,6 +394,14 @@ function StatusPanel({
               : "..."}
           </dd>
         </div>
+        <div className="col-span-2">
+          <dt className="text-slate-500">Contact</dt>
+          <dd className="font-bold text-slate-200">
+            {validation
+              ? `${validation.obstacleHits} obstacle hits, ${validation.marbleContacts} marble bumps`
+              : "..."}
+          </dd>
+        </div>
       </dl>
     </div>
   );

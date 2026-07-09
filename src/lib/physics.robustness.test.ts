@@ -23,6 +23,8 @@ describe("simulateRace robustness sweep", () => {
         );
         expect(race.validation.usedAssist, dateKey).toBe(false);
         expect(race.validation.failureReason, dateKey).toBeNull();
+        expect(race.validation.obstacleHits, dateKey).toBeGreaterThan(0);
+        expect(race.validation.marbleContacts, dateKey).toBeGreaterThan(0);
         expect(race.validation.maxStallSeconds, dateKey).toBeLessThan(4);
         expect(race.validation.minProgressPerWindow, dateKey).toBeGreaterThan(1.2);
         expect(race.spec.path.segments.some((segment) => segment.kind === "helix"), dateKey).toBe(true);

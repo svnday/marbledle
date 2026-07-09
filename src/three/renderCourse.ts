@@ -4,7 +4,6 @@ import type {
   BumperSpec,
   CourseSpec,
   CuboidSpec,
-  PathSample,
   PegSpec,
   SensorSpec,
   Vec3,
@@ -19,14 +18,6 @@ function setTransform(object: THREE.Object3D, position: Vec3, rotation?: Vec3) {
   if (rotation) {
     object.rotation.set(rotation.x, rotation.y, rotation.z, "XYZ");
   }
-}
-
-function orientAlong(mesh: THREE.Object3D, tangent: THREE.Vector3, rightHint: THREE.Vector3) {
-  const z = tangent.clone().normalize();
-  const up = new THREE.Vector3().crossVectors(z, rightHint).normalize();
-  const x = new THREE.Vector3().crossVectors(up, z).normalize();
-  const matrix = new THREE.Matrix4().makeBasis(x, up, z);
-  mesh.quaternion.setFromRotationMatrix(matrix);
 }
 
 function roleMaterial(spec: CuboidSpec): THREE.MeshStandardMaterial {
@@ -79,13 +70,13 @@ function cuboidMesh(spec: CuboidSpec): THREE.Mesh {
 }
 
 function pegMesh(spec: PegSpec): THREE.Mesh {
-  const geometry = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.halfHeight * 2, 20);
+  const geometry = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.halfHeight * 2, 24);
   const material = new THREE.MeshStandardMaterial({
-    color: "#67e8f9",
-    emissive: "#0e7490",
-    emissiveIntensity: 0.45,
-    metalness: 0.4,
-    roughness: 0.3,
+    color: "#a5f3fc",
+    emissive: "#06b6d4",
+    emissiveIntensity: 0.5,
+    metalness: 0.55,
+    roughness: 0.2,
   });
   const mesh = new THREE.Mesh(geometry, material);
   setTransform(mesh, spec.position, spec.rotation);
@@ -93,15 +84,15 @@ function pegMesh(spec: PegSpec): THREE.Mesh {
 }
 
 function bumperMesh(spec: BumperSpec): THREE.Mesh {
-  const geometry = new THREE.SphereGeometry(spec.radius, 20, 20);
+  const groupGeometry = new THREE.SphereGeometry(spec.radius, 28, 20);
   const material = new THREE.MeshStandardMaterial({
     color: "#f472b6",
     emissive: "#be185d",
-    emissiveIntensity: 0.5,
-    metalness: 0.3,
-    roughness: 0.25,
+    emissiveIntensity: 0.62,
+    metalness: 0.34,
+    roughness: 0.18,
   });
-  const mesh = new THREE.Mesh(geometry, material);
+  const mesh = new THREE.Mesh(groupGeometry, material);
   setTransform(mesh, spec.position);
   return mesh;
 }
@@ -121,63 +112,104 @@ function sensorMesh(spec: SensorSpec): THREE.Mesh {
   return mesh;
 }
 
-function trackSpanMeshes(a: PathSample, b: PathSample, spec: CourseSpec): THREE.Mesh[] {
-  const start = vector(a.position);
-  const end = vector(b.position);
-  const center = start.clone().add(end).multiplyScalar(0.5);
-  const tangent = end.clone().sub(start);
-  const length = Math.max(tangent.length(), 0.001);
-  const right = vector(a.right).add(vector(b.right)).multiplyScalar(0.5).normalize();
-  const up = new THREE.Vector3().crossVectors(tangent.clone().normalize(), right).normalize();
-
-  const floor = new THREE.Mesh(
-    new THREE.BoxGeometry(spec.path.width, 0.22, length * 1.04),
-    new THREE.MeshStandardMaterial({
-      color: "#0f1b33",
-      emissive: "#0e7490",
-      emissiveIntensity: 0.09,
-      metalness: 0.28,
-      roughness: 0.42,
-    }),
-  );
-  floor.position.copy(center).add(up.clone().multiplyScalar(-0.12));
-  orientAlong(floor, tangent, right);
-
-  const railMaterial = new THREE.MeshStandardMaterial({
-    color: "#172554",
-    emissive: "#38bdf8",
-    emissiveIntensity: 0.16,
-    metalness: 0.35,
-    roughness: 0.35,
-  });
-  const leftRail = new THREE.Mesh(
-    new THREE.BoxGeometry(0.26, spec.path.railHeight, length * 1.04),
-    railMaterial,
-  );
-  const rightRail = new THREE.Mesh(
-    new THREE.BoxGeometry(0.26, spec.path.railHeight, length * 1.04),
-    railMaterial.clone(),
-  );
-  const railLift = up.clone().multiplyScalar(spec.path.railHeight / 2);
-  leftRail.position.copy(center).add(right.clone().multiplyScalar(-spec.path.width / 2)).add(railLift);
-  rightRail.position.copy(center).add(right.clone().multiplyScalar(spec.path.width / 2)).add(railLift);
-  orientAlong(leftRail, tangent, right);
-  orientAlong(rightRail, tangent, right);
-
-  return [floor, leftRail, rightRail];
-}
-
 function buildTrackRun(spec: CourseSpec): THREE.Group {
   const group = new THREE.Group();
   group.name = "Path track";
-
-  for (let index = 0; index < spec.path.samples.length - 1; index += 1) {
-    trackSpanMeshes(spec.path.samples[index], spec.path.samples[index + 1], spec).forEach((mesh) => {
-      group.add(mesh);
-    });
-  }
+  group.add(buildTrackSurface(spec));
+  buildRailTubes(spec).forEach((rail) => group.add(rail));
+  group.add(buildCenterGlow(spec));
 
   return group;
+}
+
+function buildTrackSurface(spec: CourseSpec): THREE.Mesh {
+  const vertices: number[] = [];
+  const normals: number[] = [];
+  const indices: number[] = [];
+  const halfWidth = spec.path.width / 2;
+
+  spec.path.samples.forEach((sample) => {
+    const center = vector(sample.position);
+    const right = vector(sample.right).normalize();
+    const tangent = vector(sample.tangent).normalize();
+    const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
+    const left = center.clone().add(right.clone().multiplyScalar(-halfWidth));
+    const rightPoint = center.clone().add(right.clone().multiplyScalar(halfWidth));
+    const bowl = up.clone().multiplyScalar(-0.16);
+    const middle = center.clone().add(bowl);
+
+    [left, middle, rightPoint].forEach((point) => {
+      vertices.push(point.x, point.y, point.z);
+      normals.push(up.x, up.y, up.z);
+    });
+  });
+
+  for (let index = 0; index < spec.path.samples.length - 1; index += 1) {
+    const a = index * 3;
+    const b = (index + 1) * 3;
+    indices.push(a, b, a + 1, a + 1, b, b + 1);
+    indices.push(a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+  }
+
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geometry.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setIndex(indices);
+  geometry.computeBoundingSphere();
+
+  return new THREE.Mesh(
+    geometry,
+    new THREE.MeshStandardMaterial({
+      color: "#10203a",
+      emissive: "#0e7490",
+      emissiveIntensity: 0.12,
+      metalness: 0.34,
+      roughness: 0.38,
+      side: THREE.DoubleSide,
+    }),
+  );
+}
+
+function buildRailTubes(spec: CourseSpec): THREE.Mesh[] {
+  const halfWidth = spec.path.width / 2;
+  const railMaterial = new THREE.MeshStandardMaterial({
+    color: "#1d4ed8",
+    emissive: "#38bdf8",
+    emissiveIntensity: 0.32,
+    metalness: 0.42,
+    roughness: 0.28,
+  });
+
+  return [-1, 1].map((side) => {
+    const points = spec.path.samples.map((sample) => {
+      const center = vector(sample.position);
+      const right = vector(sample.right).normalize();
+      const tangent = vector(sample.tangent).normalize();
+      const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
+      return center
+        .add(right.multiplyScalar(side * halfWidth))
+        .add(up.multiplyScalar(spec.path.railHeight * 0.62));
+    });
+    const curve = new THREE.CatmullRomCurve3(points);
+    const geometry = new THREE.TubeGeometry(curve, Math.max(48, points.length * 2), 0.15, 10, false);
+    return new THREE.Mesh(geometry, railMaterial.clone());
+  });
+}
+
+function buildCenterGlow(spec: CourseSpec): THREE.Line {
+  const points = spec.path.samples.map((sample) => {
+    const tangent = vector(sample.tangent).normalize();
+    const right = vector(sample.right).normalize();
+    const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
+    return vector(sample.position).add(up.multiplyScalar(0.04));
+  });
+  const geometry = new THREE.BufferGeometry().setFromPoints(points);
+  const material = new THREE.LineBasicMaterial({
+    color: "#22d3ee",
+    transparent: true,
+    opacity: 0.42,
+  });
+  return new THREE.Line(geometry, material);
 }
 
 function wireframeMaterial(color = "#fbbf24"): THREE.MeshBasicMaterial {
@@ -286,9 +318,9 @@ export function buildSpinnerMeshes(spec: CourseSpec): Map<string, THREE.Mesh> {
     const material = new THREE.MeshStandardMaterial({
       color: "#a78bfa",
       emissive: "#7c3aed",
-      emissiveIntensity: 0.4,
-      metalness: 0.35,
-      roughness: 0.3,
+      emissiveIntensity: 0.56,
+      metalness: 0.42,
+      roughness: 0.22,
     });
     const mesh = new THREE.Mesh(geometry, material);
     setTransform(mesh, element.position);

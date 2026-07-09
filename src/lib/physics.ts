@@ -42,6 +42,8 @@ export type RaceValidation = {
   allFinished: boolean;
   durationInRange: boolean;
   escaped: boolean;
+  obstacleHits: number;
+  marbleContacts: number;
   maxStallSeconds: number;
   minProgressPerWindow: number;
   usedAssist: false;
@@ -70,6 +72,11 @@ type MarbleState = {
   phase: number;
   targetSpeed: number;
   nextObstacle: number;
+  verticalVelocity: number;
+  lift: number;
+  wobble: number;
+  obstacleHits: number;
+  marbleContacts: number;
   finishedAt: number | null;
   finishStation: number;
   progressHistory: number[];
@@ -139,8 +146,32 @@ function obstacleStation(element: CourseElement): number | null {
 function sortedObstacles(spec: CourseSpec) {
   return spec.elements
     .filter((element) => element.kind === "bumper" || element.kind === "peg" || element.kind === "spinner")
-    .map((element, index) => ({ element, index, station: obstacleStation(element) ?? 0 }))
+    .map((element, index) => ({
+      element,
+      index,
+      lane: laneAtStation(spec, obstacleStation(element) ?? 0, element.position),
+      radius: obstacleRadius(element),
+      station: obstacleStation(element) ?? 0,
+    }))
     .sort((a, b) => a.station - b.station || a.index - b.index);
+}
+
+function laneAtStation(spec: CourseSpec, station: number, position: Vec3) {
+  const sample = sampleCoursePath(spec.path, station);
+  const delta = {
+    x: position.x - sample.position.x,
+    y: position.y - sample.position.y,
+    z: position.z - sample.position.z,
+  };
+
+  return q(delta.x * sample.right.x + delta.y * sample.right.y + delta.z * sample.right.z);
+}
+
+function obstacleRadius(element: CourseElement) {
+  if (element.kind === "bumper") return element.radius;
+  if (element.kind === "peg") return element.radius + 0.28;
+  if (element.kind === "spinner") return Math.max(element.half.x, element.half.z) + 0.24;
+  return 0.5;
 }
 
 function createMarbleStates(spec: CourseSpec): MarbleState[] {
@@ -158,6 +189,11 @@ function createMarbleStates(spec: CourseSpec): MarbleState[] {
     phase: random() * Math.PI * 2 + index * 0.7,
     targetSpeed: baseSpeed * (0.95 + random() * 0.11),
     nextObstacle: 0,
+    verticalVelocity: 0,
+    lift: 0,
+    wobble: 0,
+    obstacleHits: 0,
+    marbleContacts: 0,
     finishedAt: null,
     finishStation: spec.finishStation,
     progressHistory: [],
@@ -166,27 +202,44 @@ function createMarbleStates(spec: CourseSpec): MarbleState[] {
 
 function applyObstacle(state: MarbleState, obstacle: ReturnType<typeof sortedObstacles>[number], spec: CourseSpec) {
   const salt = Math.round(obstacle.station * 13) + obstacle.index * 97 + state.id.charCodeAt(0);
-  const laneKick = (hashUnit(spec.seed, salt) * 2 - 1) * 1.15;
+  const laneDelta = state.lane - obstacle.lane;
+  const direction = Math.abs(laneDelta) < 0.05
+    ? hashUnit(spec.seed, salt) < 0.5 ? -1 : 1
+    : Math.sign(laneDelta);
+  const laneKick = direction * (0.7 + hashUnit(spec.seed, salt) * 0.95);
   const speedKick = hashUnit(spec.seed, salt + 31);
+  const proximity = Math.max(0, 1 - Math.abs(laneDelta) / Math.max(obstacle.radius + 0.75, 0.1));
+  const impact = 0.65 + proximity * 0.9;
 
   if (obstacle.element.kind === "bumper") {
-    state.speed += 0.18 + speedKick * 0.34;
-    state.laneVelocity += laneKick * 0.9;
+    state.speed += (0.18 + speedKick * 0.34) * impact;
+    state.laneVelocity += laneKick * 1.18 * impact;
+    state.verticalVelocity += 0.25 + proximity * 0.32;
   } else if (obstacle.element.kind === "spinner") {
-    state.speed += (speedKick - 0.35) * 0.48;
-    state.laneVelocity += laneKick * 1.15;
+    state.speed += (speedKick - 0.35) * 0.5 * impact;
+    state.laneVelocity += laneKick * 1.42 * impact;
+    state.wobble += direction * 0.16;
+    state.verticalVelocity += 0.12 + proximity * 0.18;
   } else {
-    state.speed -= 0.08 + speedKick * 0.14;
-    state.laneVelocity += laneKick * 0.55;
+    state.speed -= (0.06 + speedKick * 0.12) * impact;
+    state.laneVelocity += laneKick * 0.72 * impact;
+    state.verticalVelocity += 0.08 + proximity * 0.15;
   }
+
+  state.obstacleHits += 1;
 }
 
 function recordMarbleFrame(track: BodyTrack, state: MarbleState, spec: CourseSpec) {
   const sample = sampleCoursePath(spec.path, state.station);
   const lateralLimit = spec.path.width / 2 - spec.marble.radius * 1.2;
   const lane = clamp(state.lane, -lateralLimit, lateralLimit);
-  const position = add(sample.position, add(scale(sample.right, lane), { x: 0, y: spec.marble.radius + 0.16, z: 0 }));
-  const quat = quatFromAxisAngle(sample.right, state.spin);
+  const wobble = Math.sin(state.spin * 0.23 + state.phase) * state.wobble;
+  const position = add(
+    sample.position,
+    add(scale(sample.right, lane), { x: 0, y: spec.marble.radius + 0.16 + state.lift, z: 0 }),
+  );
+  const spinAxis = normalize(add(sample.right, scale(sample.tangent, wobble)));
+  const quat = quatFromAxisAngle(spinAxis, state.spin);
   track.frames.push(q(position.x), q(position.y), q(position.z), quat.x, quat.y, quat.z, quat.w);
 }
 
@@ -226,6 +279,8 @@ function runSimulation(spec: CourseSpec, attempts: number) {
   let escaped = false;
   let maxStallSeconds = 0;
   let minProgressPerWindow = Number.POSITIVE_INFINITY;
+  let obstacleHits = 0;
+  let marbleContacts = 0;
   let steps = 0;
 
   for (; steps < MAX_STEPS; steps += 1) {
@@ -246,11 +301,19 @@ function runSimulation(spec: CourseSpec, attempts: number) {
       state.laneVelocity += Math.sin(state.station * 0.22 + state.phase) * 0.018;
       state.laneVelocity *= 0.982;
       state.lane += state.laneVelocity * DT;
+      state.verticalVelocity -= 2.8 * DT;
+      state.lift = Math.max(0, state.lift + state.verticalVelocity * DT);
+      if (state.lift === 0 && state.verticalVelocity < 0) {
+        state.verticalVelocity *= -0.22;
+      }
+      state.wobble *= 0.965;
 
       if (Math.abs(state.lane) > railLimit) {
         state.lane = Math.sign(state.lane) * railLimit;
-        state.laneVelocity *= -0.58;
-        state.speed *= 0.985;
+        state.laneVelocity *= -0.68;
+        state.speed *= 0.975;
+        state.verticalVelocity = Math.max(state.verticalVelocity, 0.1);
+        state.wobble += Math.sign(state.lane) * 0.08;
       }
 
       const previousStation = state.station;
@@ -259,10 +322,15 @@ function runSimulation(spec: CourseSpec, attempts: number) {
 
       while (
         state.nextObstacle < obstacles.length &&
-        obstacles[state.nextObstacle].station <= state.station + 0.35
+        obstacles[state.nextObstacle].station <= state.station + 0.55
       ) {
-        if (obstacles[state.nextObstacle].station >= previousStation - 0.35) {
-          applyObstacle(state, obstacles[state.nextObstacle], spec);
+        const obstacle = obstacles[state.nextObstacle];
+        const hitLaneWidth = obstacle.radius + spec.marble.radius + 0.32;
+        if (
+          obstacle.station >= previousStation - 0.55 &&
+          Math.abs(state.lane - obstacle.lane) <= hitLaneWidth
+        ) {
+          applyObstacle(state, obstacle, spec);
         }
         state.nextObstacle += 1;
       }
@@ -290,6 +358,46 @@ function runSimulation(spec: CourseSpec, attempts: number) {
       }
     });
 
+    for (let left = 0; left < marbleStates.length; left += 1) {
+      for (let right = left + 1; right < marbleStates.length; right += 1) {
+        const a = marbleStates[left];
+        const b = marbleStates[right];
+        if (a.finishedAt !== null || b.finishedAt !== null) {
+          continue;
+        }
+
+        const stationDelta = b.station - a.station;
+        const laneDelta = b.lane - a.lane;
+        const contactDistance = Math.sqrt(stationDelta * stationDelta + laneDelta * laneDelta);
+        const minDistance = spec.marble.radius * 2.1;
+        if (contactDistance <= 0.001 || contactDistance >= minDistance) {
+          continue;
+        }
+
+        const overlap = minDistance - contactDistance;
+        const nx = stationDelta / contactDistance;
+        const ny = laneDelta / contactDistance;
+        const impulse = overlap * 0.54;
+        const speedSwap = (a.speed - b.speed) * 0.22;
+
+        a.station = q(Math.max(0, a.station - nx * impulse * 0.5));
+        b.station = q(Math.min(b.finishStation, b.station + nx * impulse * 0.5));
+        a.lane -= ny * impulse * 0.72;
+        b.lane += ny * impulse * 0.72;
+        a.laneVelocity -= ny * impulse * 4.2;
+        b.laneVelocity += ny * impulse * 4.2;
+        a.speed -= speedSwap;
+        b.speed += speedSwap;
+        a.verticalVelocity = Math.max(a.verticalVelocity, 0.08);
+        b.verticalVelocity = Math.max(b.verticalVelocity, 0.08);
+        a.wobble -= ny * 0.08;
+        b.wobble += ny * 0.08;
+        a.marbleContacts += 1;
+        b.marbleContacts += 1;
+        marbleContacts += 1;
+      }
+    }
+
     marbleStates.forEach((state, index) => recordMarbleFrame(marbleTracks[index], state, spec));
     spinnerElements.forEach((element, index) => recordSpinnerFrame(spinnerTracks[index], element, steps));
 
@@ -313,6 +421,7 @@ function runSimulation(spec: CourseSpec, attempts: number) {
   const valid = allFinished && durationInRange && !escaped && maxStallSeconds < STALL_WINDOW_SECONDS;
   const durationSeconds = q(frameCount * DT);
   const safeMinProgress = Number.isFinite(minProgressPerWindow) ? minProgressPerWindow : spec.path.length;
+  obstacleHits = marbleStates.reduce((sum, state) => sum + state.obstacleHits, 0);
   const failureReason = valid
     ? null
     : escaped
@@ -332,6 +441,8 @@ function runSimulation(spec: CourseSpec, attempts: number) {
       allFinished,
       durationInRange,
       escaped,
+      obstacleHits,
+      marbleContacts,
       maxStallSeconds: q(maxStallSeconds),
       minProgressPerWindow: q(safeMinProgress),
       usedAssist: false as const,
