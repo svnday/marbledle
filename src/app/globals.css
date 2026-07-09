@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 :root {
-  --background: #f5f1e8;
-  --foreground: #1f2933;
+  --background: #070a12;
+  --foreground: #f8fafc;
 }
 
 @theme inline {
@@ -22,53 +22,26 @@ html {
 
 body {
   min-height: 100vh;
-  background: var(--background);
+  background:
+    radial-gradient(circle at 12% 0%, rgba(34, 211, 238, 0.16), transparent 28rem),
+    radial-gradient(circle at 88% 10%, rgba(192, 132, 252, 0.12), transparent 26rem),
+    var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
 
-button {
+button,
+select {
   cursor: pointer;
 }
 
-button:disabled {
+button:disabled,
+select:disabled {
   cursor: not-allowed;
 }
 
-.marble-racer {
-  animation-name: marble-race;
-  animation-fill-mode: forwards;
-  animation-timing-function: cubic-bezier(0.18, 0.72, 0.22, 1);
-}
-
-@keyframes marble-race {
-  0% {
-    left: 0;
-    transform: translateY(-50%) rotate(0deg);
-  }
-
-  18% {
-    left: 18%;
-    transform: translateY(-64%) rotate(180deg);
-  }
-
-  37% {
-    left: 37%;
-    transform: translateY(-36%) rotate(360deg);
-  }
-
-  58% {
-    left: 58%;
-    transform: translateY(-58%) rotate(540deg);
-  }
-
-  79% {
-    left: 79%;
-    transform: translateY(-42%) rotate(720deg);
-  }
-
-  100% {
-    left: calc(100% - 2.5rem);
-    transform: translateY(-50%) rotate(900deg);
+@media (prefers-reduced-motion: reduce) {
+  * {
+    scroll-behavior: auto !important;
   }
 }
