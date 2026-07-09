@@ -5,6 +5,7 @@ import * as THREE from "three";
 import type { CourseSpec } from "@/lib/course";
 import type { Trajectory } from "@/lib/physics";
 import {
+  buildColliderWireframes,
   buildMarbleMeshes,
   buildSpinnerMeshes,
   buildStaticCourse,
@@ -22,13 +23,16 @@ export function RaceScene({
   spec,
   trajectory,
   raceState,
+  showDebugColliders = false,
 }: {
   spec: CourseSpec;
   trajectory: Trajectory;
   raceState: RaceState;
+  showDebugColliders?: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const raceStateRef = useRef<RaceState>(raceState);
+  const debugRef = useRef(showDebugColliders);
   const startTimeRef = useRef<number | null>(null);
 
   // The animation loop reads these refs so state changes don't tear down the scene.
@@ -43,6 +47,10 @@ export function RaceScene({
   }, [raceState]);
 
   useEffect(() => {
+    debugRef.current = showDebugColliders;
+  }, [showDebugColliders]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return;
@@ -52,22 +60,29 @@ export function RaceScene({
     let disposed = false;
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color("#050814");
-    scene.fog = new THREE.Fog("#050814", 16, 78);
+    scene.background = new THREE.Color("#040712");
+    scene.fog = new THREE.Fog("#050814", 14, 86);
 
-    const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 240);
-    camera.position.set(0, 6, 24);
+    const camera = new THREE.PerspectiveCamera(58, 1, 0.1, 240);
+    camera.position.set(0, 8, 26);
 
-    scene.add(new THREE.AmbientLight("#b7c9ff", 1.1));
+    scene.add(new THREE.AmbientLight("#b7c9ff", 1.25));
     const keyLight = new THREE.DirectionalLight("#ffffff", 2);
     keyLight.position.set(10, 20, 16);
+    keyLight.castShadow = true;
     const cyanLight = new THREE.PointLight("#22d3ee", 2.6, 60);
     cyanLight.position.set(-8, 4, 12);
     const violetLight = new THREE.PointLight("#c084fc", 2.2, 70);
     violetLight.position.set(9, -24, 8);
-    scene.add(keyLight, cyanLight, violetLight);
+    const leaderLight = new THREE.PointLight("#ffffff", 1.6, 20);
+    scene.add(keyLight, cyanLight, violetLight, leaderLight);
 
     scene.add(buildStaticCourse(spec));
+    const debugGroup = buildColliderWireframes(spec);
+    debugGroup.visible = debugRef.current;
+    scene.add(debugGroup);
+    const { gate, leftGate, rightGate } = buildStartGate(spec);
+    scene.add(gate);
 
     const dynamicMeshes = new Map<string, THREE.Mesh>([
       ...buildMarbleMeshes(spec),
@@ -101,9 +116,13 @@ export function RaceScene({
 
     const { dt, frameCount } = trajectory;
     const lastFrame = Math.max(frameCount - 1, 0);
-    const pos = new THREE.Vector3();
     const quatA = new THREE.Quaternion();
     const quatB = new THREE.Quaternion();
+    const centroid = new THREE.Vector3();
+    const leader = new THREE.Vector3();
+    const previousLeader = new THREE.Vector3();
+    const travelDirection = new THREE.Vector3(0, -1, 0);
+    const ahead = new THREE.Vector3();
     const target = new THREE.Vector3();
     const desired = new THREE.Vector3();
 
@@ -135,20 +154,59 @@ export function RaceScene({
     };
 
     const updateCamera = () => {
-      let cx = 0;
-      let cy = 0;
+      centroid.set(0, 0, 0);
+      leader.set(0, Number.POSITIVE_INFINITY, 0);
+      let lowestY = Number.POSITIVE_INFINITY;
+      let highestY = Number.NEGATIVE_INFINITY;
+
       for (const mesh of marbleMeshes) {
-        cx += mesh.position.x;
-        cy += mesh.position.y;
+        centroid.add(mesh.position);
+        if (mesh.position.y < leader.y) {
+          leader.copy(mesh.position);
+        }
+        lowestY = Math.min(lowestY, mesh.position.y);
+        highestY = Math.max(highestY, mesh.position.y);
       }
+
       const n = Math.max(marbleMeshes.length, 1);
-      cx /= n;
-      cy /= n;
-      const framedX = THREE.MathUtils.clamp(cx, -4, 4);
-      target.set(framedX * 0.6, cy - 2, 0);
-      desired.set(framedX * 0.4, cy + 5, 24);
-      camera.position.lerp(desired, 0.06);
+      centroid.divideScalar(n);
+
+      travelDirection.copy(leader).sub(previousLeader);
+      if (travelDirection.lengthSq() < 0.0001) {
+        travelDirection.set(0, -1, 0);
+      } else {
+        travelDirection.normalize();
+      }
+      previousLeader.copy(leader);
+
+      const packSpread = Math.max(0, highestY - lowestY);
+      ahead.copy(travelDirection).multiplyScalar(2.2);
+      target.copy(centroid).add(ahead);
+      target.y -= 0.9;
+      desired.copy(leader);
+      desired.addScaledVector(travelDirection, -5.6);
+      desired.y += 4.2 + Math.min(packSpread * 0.08, 2.2);
+      desired.z += 18 + Math.min(packSpread * 0.16, 5);
+      desired.x = THREE.MathUtils.clamp(desired.x, -8, 8);
+
+      camera.fov = THREE.MathUtils.lerp(camera.fov, 56 + Math.min(packSpread, 18) * 0.45, 0.05);
+      camera.updateProjectionMatrix();
+      camera.position.lerp(desired, raceStateRef.current === "racing" ? 0.1 : 0.06);
       camera.lookAt(target);
+      leaderLight.position.copy(leader).add(new THREE.Vector3(0, 3, 4));
+    };
+
+    const updateStartGate = (now: number) => {
+      const state = raceStateRef.current;
+      const elapsed =
+        state === "racing" && startTimeRef.current !== null
+          ? (now - startTimeRef.current) / 1000
+          : state === "finished"
+            ? 1
+            : 0;
+      const open = state === "guessing" ? 0 : easeOut(clamp(elapsed / 0.8, 0, 1));
+      leftGate.rotation.z = open * -1.25;
+      rightGate.rotation.z = open * 1.25;
     };
 
     const renderFrame = (now: number) => {
@@ -164,6 +222,8 @@ export function RaceScene({
           }
         });
       }
+      debugGroup.visible = debugRef.current;
+      updateStartGate(now);
       updateCamera();
       renderer.render(scene, camera);
       frameId = window.requestAnimationFrame(renderFrame);
@@ -189,6 +249,36 @@ export function RaceScene({
   );
 }
 
+function buildStartGate(spec: CourseSpec) {
+  const topY = Math.max(...spec.marbleStarts.map((start) => start.position.y));
+  const group = new THREE.Group();
+  const material = new THREE.MeshStandardMaterial({
+    color: "#38bdf8",
+    emissive: "#0891b2",
+    emissiveIntensity: 0.7,
+    metalness: 0.45,
+    roughness: 0.25,
+  });
+  const postGeometry = new THREE.BoxGeometry(0.16, 2.2, 0.16);
+  const leftPost = new THREE.Mesh(postGeometry, material);
+  const rightPost = new THREE.Mesh(postGeometry, material);
+  const leftGateGeometry = new THREE.BoxGeometry(3.2, 0.16, 0.22);
+  const rightGateGeometry = new THREE.BoxGeometry(3.2, 0.16, 0.22);
+  const leftGate = new THREE.Mesh(leftGateGeometry, material);
+  const rightGate = new THREE.Mesh(rightGateGeometry, material);
+
+  group.position.set(0, topY - 0.9, 2.7);
+  leftPost.position.set(-3.3, 0.1, 0);
+  rightPost.position.set(3.3, 0.1, 0);
+  leftGate.position.set(-1.55, 0.7, 0);
+  rightGate.position.set(1.55, 0.7, 0);
+  leftGate.geometry.translate(1.55, 0, 0);
+  rightGate.geometry.translate(-1.55, 0, 0);
+  group.add(leftPost, rightPost, leftGate, rightGate);
+
+  return { gate: group, leftGate, rightGate };
+}
+
 function disposeObject(object: THREE.Object3D) {
   object.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -200,4 +290,12 @@ function disposeObject(object: THREE.Object3D) {
       }
     }
   });
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function easeOut(value: number) {
+  return 1 - Math.pow(1 - value, 3);
 }

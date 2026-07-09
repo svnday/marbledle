@@ -22,11 +22,15 @@ import { RaceScene } from "@/components/RaceScene";
 
 type RaceState = "guessing" | "racing" | "finished";
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 export function MarbledleGame() {
   const puzzle = useMemo(() => getDailyPuzzle(), []);
   const [race, setRace] = useState<RaceResult | null>(null);
   const [guess, setGuess] = useState<PositionGuess>(() => createEmptyGuess());
   const [raceState, setRaceState] = useState<RaceState>("guessing");
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
+  const [showDebugColliders, setShowDebugColliders] = useState(false);
 
   const validation = getGuessValidation(guess);
   const guessedOrder = useMemo(() => guessToOrder(guess), [guess]);
@@ -39,8 +43,8 @@ export function MarbledleGame() {
     [guessedOrder, race, raceState],
   );
 
-  // Precompute today's race once, on the client. The dynamic import keeps the ~2 MB
-  // deterministic Rapier WASM out of the initial bundle — it only loads after mount.
+  // Precompute today's race once, on the client. The dynamic import keeps the Rapier WASM
+  // out of the initial bundle; it only loads after mount.
   useEffect(() => {
     let cancelled = false;
 
@@ -51,19 +55,22 @@ export function MarbledleGame() {
           return;
         }
         setRace(result);
-        // TEMP (Milestone 4): confirm the precompute wiring before the renderer exists.
-        console.log("[marbledle] precomputed race", {
-          finishOrder: result.finishOrder,
-          durationSeconds: result.durationSeconds,
-          attempts: result.attempts,
-          valid: result.valid,
-        });
       });
 
     return () => {
       cancelled = true;
     };
   }, [puzzle.courseSpec]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setPrefersReducedMotion(media.matches);
+
+    updatePreference();
+    media.addEventListener("change", updatePreference);
+
+    return () => media.removeEventListener("change", updatePreference);
+  }, []);
 
   useEffect(() => {
     if (raceState !== "racing" || !race) {
@@ -100,7 +107,7 @@ export function MarbledleGame() {
       return;
     }
 
-    setRaceState("racing");
+    setRaceState(prefersReducedMotion ? "finished" : "racing");
   }
 
   return (
@@ -118,7 +125,7 @@ export function MarbledleGame() {
           <div className="max-w-xl text-sm leading-6 text-slate-300">
             Predict each marble&apos;s finishing spot, then watch the whole pack
             drop into a generated 3D course where the finishing order is decided by
-            real, deterministic physics — the same race for everyone.
+            real, deterministic physics - the same race for everyone.
           </div>
         </header>
 
@@ -133,7 +140,7 @@ export function MarbledleGame() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <p className="min-h-5 text-sm font-semibold text-amber-200">
                 {!isReady
-                  ? "Generating today's race…"
+                  ? "Generating today's race..."
                   : validation.hasDuplicates
                     ? "Duplicate position typed."
                     : validation.isComplete
@@ -178,6 +185,7 @@ export function MarbledleGame() {
                 spec={race.spec}
                 trajectory={race.trajectory}
                 raceState={raceState}
+                showDebugColliders={showDebugColliders}
               />
             ) : (
               <RacePlaceholder isReady={isReady} raceState={raceState} />
@@ -188,9 +196,24 @@ export function MarbledleGame() {
           </div>
 
           <aside className="flex flex-col gap-4">
+            {IS_DEV ? (
+              <button
+                className={
+                  showDebugColliders
+                    ? "rounded-lg border border-amber-300 bg-amber-300/15 px-4 py-3 text-left text-sm font-black text-amber-100 transition hover:bg-amber-300/20"
+                    : "rounded-lg border border-white/10 bg-white/[0.04] px-4 py-3 text-left text-sm font-black text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100"
+                }
+                onClick={() => setShowDebugColliders((current) => !current)}
+                type="button"
+              >
+                {showDebugColliders ? "Hide collider wireframe" : "Show collider wireframe"}
+              </button>
+            ) : null}
+
             <StatusPanel
               dateKey={puzzle.dateKey}
               duration={race ? Math.round(race.durationSeconds) : null}
+              prefersReducedMotion={prefersReducedMotion}
               raceState={raceState}
               ready={isReady}
             />
@@ -216,10 +239,12 @@ export function MarbledleGame() {
             ) : (
               <div className="rounded-lg border border-white/10 bg-white/[0.04] p-4 text-sm leading-6 text-slate-300">
                 {!isReady
-                  ? "Generating today's race — one moment while the physics is precomputed."
+                  ? "Generating today's race. One moment while the physics is precomputed."
                   : raceState === "racing"
                     ? "Race in progress. The camera follows the pack until all marbles finish."
-                    : "Lock a valid prediction to drop the marbles into the 3D course."}
+                    : prefersReducedMotion
+                      ? "Reduced motion is enabled. Lock a valid prediction to reveal the result instantly."
+                      : "Lock a valid prediction to drop the marbles into the 3D course."}
               </div>
             )}
           </aside>
@@ -229,8 +254,6 @@ export function MarbledleGame() {
   );
 }
 
-// TEMP (Milestone 4): a lightweight stand-in for the 3D scene. Prompt 5 replaces this with
-// <RaceScene> that renders the course from the spec and animates it from the trajectory.
 function RacePlaceholder({
   isReady,
   raceState,
@@ -239,11 +262,11 @@ function RacePlaceholder({
   raceState: RaceState;
 }) {
   const message = !isReady
-    ? "Generating today's deterministic race…"
+    ? "Generating today's deterministic race..."
     : raceState === "guessing"
       ? "Race ready. Lock a valid prediction to drop the marbles into the 3D course."
       : raceState === "racing"
-        ? "Race in progress…"
+        ? "Race in progress..."
         : "Race complete.";
 
   return (
@@ -317,11 +340,13 @@ function MarbleGuessCard({
 function StatusPanel({
   dateKey,
   duration,
+  prefersReducedMotion,
   raceState,
   ready,
 }: {
   dateKey: string;
   duration: number | null;
+  prefersReducedMotion: boolean;
   raceState: RaceState;
   ready: boolean;
 }) {
@@ -347,7 +372,13 @@ function StatusPanel({
         <div>
           <dt className="text-slate-500">Race time</dt>
           <dd className="font-bold text-slate-200">
-            {duration === null ? "…" : `${duration}s`}
+            {duration === null ? "..." : `${duration}s`}
+          </dd>
+        </div>
+        <div className="col-span-2">
+          <dt className="text-slate-500">Motion</dt>
+          <dd className="font-bold text-slate-200">
+            {prefersReducedMotion ? "Reduced: instant result" : "Animated replay"}
           </dd>
         </div>
       </dl>

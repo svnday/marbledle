@@ -12,7 +12,7 @@ function finalFrame(trajectory: Trajectory): number[][] {
 }
 
 describe("simulateRace", () => {
-  it("is deterministic: same seed → identical finish order and bit-identical final transforms", async () => {
+  it("is deterministic: same seed -> identical finish order and bit-identical final transforms", async () => {
     const a = await simulateRace(generateCourse("marbledle-2026-07-08"));
     const b = await simulateRace(generateCourse("marbledle-2026-07-08"));
 

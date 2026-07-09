@@ -58,7 +58,7 @@ export function getNewYorkDateKey(date = new Date()) {
 }
 
 /**
- * The daily puzzle no longer carries a predetermined finish order — that now emerges from
+ * The daily puzzle no longer carries a predetermined finish order - that now emerges from
  * the physics simulation of `courseSpec` (see src/lib/physics.ts `simulateRace`). This just
  * pins the deterministic daily seed and the procedurally generated course everyone shares.
  */

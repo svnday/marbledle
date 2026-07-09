@@ -9,14 +9,14 @@ import type {
   Vec3,
 } from "@/lib/course";
 
-// Renders a CourseSpec into three.js meshes that mirror the Rapier colliders 1:1 — same
+// Renders a CourseSpec into three.js meshes that mirror the Rapier colliders 1:1 - same
 // primitives, same half-extents, same positions/rotations. Because the physics colliders
 // (src/lib/physics.ts) and these meshes come from the same spec, what you see is exactly
 // what collides. That equivalence is the fix for the old "everything clips through
 // everything" behaviour.
 //
 // Static scenery (walls/floor/pegs/bumpers/ramps/dividers/funnel/finish) is built here.
-// The moving bodies — marbles and spinners — are created here too but positioned every
+// The moving bodies - marbles and spinners - are created here too but positioned every
 // frame by RaceScene from the recorded trajectory, keyed by the same track ids the
 // simulation used ("marble:<id>", "spinner:<elementIndex>").
 
@@ -129,6 +129,44 @@ function sensorMesh(spec: SensorSpec): THREE.Mesh {
   return mesh;
 }
 
+function wireframeMaterial(color = "#fbbf24"): THREE.MeshBasicMaterial {
+  return new THREE.MeshBasicMaterial({
+    color,
+    depthTest: false,
+    transparent: true,
+    opacity: 0.7,
+    wireframe: true,
+  });
+}
+
+function debugCuboidMesh(spec: CuboidSpec): THREE.Mesh {
+  const geometry = new THREE.BoxGeometry(spec.half.x * 2, spec.half.y * 2, spec.half.z * 2);
+  const mesh = new THREE.Mesh(geometry, wireframeMaterial(spec.role === "wall" ? "#fbbf24" : "#38bdf8"));
+  setTransform(mesh, spec.position, spec.rotation);
+  return mesh;
+}
+
+function debugPegMesh(spec: PegSpec): THREE.Mesh {
+  const geometry = new THREE.CylinderGeometry(spec.radius, spec.radius, spec.halfHeight * 2, 16);
+  const mesh = new THREE.Mesh(geometry, wireframeMaterial("#22d3ee"));
+  setTransform(mesh, spec.position, spec.rotation);
+  return mesh;
+}
+
+function debugBumperMesh(spec: BumperSpec): THREE.Mesh {
+  const geometry = new THREE.SphereGeometry(spec.radius, 16, 12);
+  const mesh = new THREE.Mesh(geometry, wireframeMaterial("#f472b6"));
+  setTransform(mesh, spec.position);
+  return mesh;
+}
+
+function debugSensorMesh(spec: SensorSpec): THREE.Mesh {
+  const geometry = new THREE.BoxGeometry(spec.half.x * 2, spec.half.y * 2, spec.half.z * 2);
+  const mesh = new THREE.Mesh(geometry, wireframeMaterial("#34d399"));
+  setTransform(mesh, spec.position);
+  return mesh;
+}
+
 /** All non-moving scenery for a course, as one group. */
 export function buildStaticCourse(spec: CourseSpec): THREE.Group {
   const group = new THREE.Group();
@@ -143,7 +181,32 @@ export function buildStaticCourse(spec: CourseSpec): THREE.Group {
     } else if (element.kind === "sensor") {
       group.add(sensorMesh(element));
     }
-    // "spinner" is a moving body — see buildSpinnerMeshes.
+    // "spinner" is a moving body - see buildSpinnerMeshes.
+  });
+
+  return group;
+}
+
+/** Dev-only collider overlay. It mirrors the same CourseSpec primitives used by Rapier. */
+export function buildColliderWireframes(spec: CourseSpec): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "Collider wireframes";
+
+  spec.elements.forEach((element) => {
+    if (element.kind === "cuboid") {
+      group.add(debugCuboidMesh(element));
+    } else if (element.kind === "peg") {
+      group.add(debugPegMesh(element));
+    } else if (element.kind === "bumper") {
+      group.add(debugBumperMesh(element));
+    } else if (element.kind === "sensor") {
+      group.add(debugSensorMesh(element));
+    } else if (element.kind === "spinner") {
+      const geometry = new THREE.BoxGeometry(element.half.x * 2, element.half.y * 2, element.half.z * 2);
+      const mesh = new THREE.Mesh(geometry, wireframeMaterial("#a78bfa"));
+      setTransform(mesh, element.position);
+      group.add(mesh);
+    }
   });
 
   return group;

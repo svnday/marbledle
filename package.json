@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run --exclude **/*.robustness.test.ts",
+    "test:robustness": "vitest run src/lib/physics.robustness.test.ts"
   },
   "dependencies": {
     "@dimforge/rapier3d-deterministic-compat": "^0.19.3",

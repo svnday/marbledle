@@ -3,7 +3,7 @@
 // This module has NO three.js or Rapier imports on purpose: it emits a plain-data
 // `CourseSpec` that is the single source of truth for BOTH the physics colliders
 // (src/lib/physics.ts) and the rendered meshes (src/three/renderCourse.ts). Because
-// both sides read the same spec, what you see is exactly what collides — that is the
+// both sides read the same spec, what you see is exactly what collides - that is the
 // fix for the old "everything clips through everything" problem.
 //
 // The course is a tall, enclosed vertical shaft. Marbles are dropped in at the top and
@@ -13,8 +13,8 @@
 //
 // DETERMINISM: every numeric value is quantized to 1e-3 before it leaves this file.
 // Rapier's docs warn that transcendental functions (Math.sin/cos) are not cross-platform
-// deterministic, so we (a) never use them here — all variation comes from the seeded
-// PRNG — and (b) quantize regardless, so any float that does sneak in is snapped to a
+// deterministic, so we (a) never use them here - all variation comes from the seeded
+// PRNG - and (b) quantize regardless, so any float that does sneak in is snapped to a
 // grid coarser than any cross-engine rounding difference.
 
 import { type MarbleId, MARBLES, createSeededRandom } from "./game";
@@ -26,7 +26,7 @@ type PhysicsProps = {
   friction: number;
 };
 
-/** A box collider — also the renderable unit for floors, walls, ramps, dividers, funnels. */
+/** A box collider - also the renderable unit for floors, walls, ramps, dividers, funnels. */
 export type CuboidSpec = PhysicsProps & {
   kind: "cuboid";
   role: "wall" | "floor" | "ramp" | "divider" | "funnel";
@@ -37,7 +37,7 @@ export type CuboidSpec = PhysicsProps & {
   rotation: Vec3;
 };
 
-/** A fixed cylinder — a pachinko peg. Rendered/collided lying across the shaft depth (Z). */
+/** A fixed cylinder - a pachinko peg. Rendered/collided lying across the shaft depth (Z). */
 export type PegSpec = PhysicsProps & {
   kind: "peg";
   radius: number;
@@ -312,14 +312,14 @@ function buildMarbleStarts(random: () => number): MarbleStart[] {
 }
 
 /**
- * Build the full daily course for a given seed. Same seed → identical spec (deep-equal),
- * different seeds → different specs. All numbers are quantized to 1e-3.
+ * Build the full daily course for a given seed. Same seed -> identical spec (deep-equal),
+ * different seeds -> different specs. All numbers are quantized to 1e-3.
  */
 export function generateCourse(seed: string): CourseSpec {
   const random = createSeededRandom(seed);
 
   const elements: CourseElement[] = [];
-  // Deterministic insertion order: shell, then layers top→bottom, then funnel, then sensor.
+  // Deterministic insertion order: shell, then layers top-to-bottom, then funnel, then sensor.
   elements.push(...buildShell());
   for (let i = 0; i < LAYER_COUNT; i += 1) {
     elements.push(...buildLayer(random, q(FIRST_LAYER_Y - i * LAYER_SPACING)));

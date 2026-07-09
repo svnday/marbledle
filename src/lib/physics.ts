@@ -7,7 +7,7 @@
 //   - durationSeconds: emergent race length = steps * dt.
 //
 // If a course fails (a marble gets stuck or escapes the bounds), we salt the seed and
-// regenerate — so a procedurally generated day is always a valid, completable race.
+// regenerate - so a procedurally generated day is always a valid, completable race.
 //
 // Determinism: fixed timestep, seeded inputs, a fresh world per run, bodies inserted in a
 // stable order, and Euler->quaternion conversions quantized (sin/cos are not cross-platform
@@ -40,7 +40,7 @@ export type Trajectory = {
 };
 
 export type RaceResult = {
-  /** The (possibly reseeded) spec that actually produced this race — render THIS one. */
+  /** The (possibly reseeded) spec that actually produced this race - render THIS one. */
   spec: CourseSpec;
   seed: string;
   attempts: number;
