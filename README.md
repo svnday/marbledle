@@ -7,7 +7,7 @@ Each day, using the `America/New_York` date, the app generates:
 - a deterministic daily seed
 - a five-marble finish order
 - a vertical track path
-- track features like loops, portals, bumpers, boosts, switchbacks, and spinners
+- track features like loops, portals, bumpers, and spinners
 - a 30-45 second race duration
 
 Players assign each marble a guessed finishing position from 1 to 5, submit once, then watch the marbles drop down the same generated track everyone else gets. Results remain hidden until the race finishes. Scoring is based on total position error: a perfect order is 100%, and the exact reverse order is 0%.

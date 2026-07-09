@@ -11,9 +11,7 @@ export type TrackFeatureKind =
   | "loop"
   | "portal"
   | "bumper"
-  | "spinner"
-  | "switchback"
-  | "boost";
+  | "spinner";
 
 export type TrackFeature = {
   id: string;
@@ -193,8 +191,6 @@ function createTrackFeatures(random: () => number): TrackFeature[] {
     "portal",
     "bumper",
     "spinner",
-    "switchback",
-    "boost",
   ];
 
   return Array.from({ length: 11 }, (_, index) => ({

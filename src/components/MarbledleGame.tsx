@@ -1,6 +1,12 @@
 "use client";
 
-import { type CSSProperties, useEffect, useMemo, useState } from "react";
+import {
+  type CSSProperties,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   type Marble,
   type MarbleId,
@@ -17,15 +23,16 @@ import {
 
 type RaceState = "guessing" | "racing" | "finished";
 
-const POSITION_OPTIONS = [1, 2, 3, 4, 5];
-
 export function MarbledleGame() {
   const puzzle = useMemo(() => getDailyPuzzle(), []);
   const [guess, setGuess] = useState<PositionGuess>(() => createEmptyGuess());
   const [raceState, setRaceState] = useState<RaceState>("guessing");
+  const [cameraProgress, setCameraProgress] = useState(0);
+  const raceStartedAt = useRef<number | null>(null);
 
   const validation = getGuessValidation(guess);
   const guessedOrder = useMemo(() => guessToOrder(guess), [guess]);
+  const duplicatePositions = useMemo(() => getDuplicatePositions(guess), [guess]);
   const score = useMemo(
     () =>
       raceState === "finished"
@@ -40,15 +47,50 @@ export function MarbledleGame() {
     }
 
     const timeout = window.setTimeout(
-      () => setRaceState("finished"),
+      () => {
+        setCameraProgress(1);
+        setRaceState("finished");
+      },
       puzzle.raceDurationSeconds * 1000 + 700,
     );
 
     return () => window.clearTimeout(timeout);
   }, [puzzle.raceDurationSeconds, raceState]);
 
+  useEffect(() => {
+    if (raceState !== "racing") {
+      raceStartedAt.current = null;
+      return;
+    }
+
+    raceStartedAt.current = performance.now();
+    let animationFrame = 0;
+
+    function updateCamera(now: number) {
+      if (raceStartedAt.current === null) {
+        return;
+      }
+
+      const elapsed = (now - raceStartedAt.current) / 1000;
+      const progress = Math.min(elapsed / puzzle.raceDurationSeconds, 1);
+      setCameraProgress(progress);
+
+      if (progress < 1) {
+        animationFrame = window.requestAnimationFrame(updateCamera);
+      }
+    }
+
+    animationFrame = window.requestAnimationFrame(updateCamera);
+
+    return () => window.cancelAnimationFrame(animationFrame);
+  }, [puzzle.raceDurationSeconds, raceState]);
+
   function updateGuess(marbleId: MarbleId, value: string) {
     if (raceState !== "guessing") {
+      return;
+    }
+
+    if (!/^[1-5]?$/.test(value)) {
       return;
     }
 
@@ -63,6 +105,7 @@ export function MarbledleGame() {
       return;
     }
 
+    setCameraProgress(0);
     setRaceState("racing");
   }
 
@@ -96,7 +139,7 @@ export function MarbledleGame() {
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
               <p className="min-h-5 text-sm font-semibold text-amber-200">
                 {validation.hasDuplicates
-                  ? "Duplicate positions need fixing."
+                  ? "Duplicate position typed."
                   : validation.isComplete
                     ? "Ready to race."
                     : "Pick a finishing spot for every marble."}
@@ -112,22 +155,34 @@ export function MarbledleGame() {
           </div>
 
           <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-            {puzzle.marbles.map((marble) => (
-              <MarbleGuessCard
-                disabled={raceState !== "guessing"}
-                guess={guess[marble.id]}
-                key={marble.id}
-                marble={marble}
-                onChange={(value) => updateGuess(marble.id, value)}
-              />
-            ))}
+            {puzzle.marbles.map((marble) => {
+              const marbleGuess = guess[marble.id];
+
+              return (
+                <MarbleGuessCard
+                  disabled={raceState !== "guessing"}
+                  hasDuplicate={
+                    typeof marbleGuess === "number" &&
+                    duplicatePositions.has(marbleGuess)
+                  }
+                  guess={marbleGuess}
+                  key={marble.id}
+                  marble={marble}
+                  onChange={(value) => updateGuess(marble.id, value)}
+                />
+              );
+            })}
           </div>
         </section>
 
         <section className="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="relative min-h-[780px] overflow-hidden rounded-lg border border-cyan-300/20 bg-[#0b1020] shadow-2xl shadow-cyan-950/30">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(34,211,238,0.22),_transparent_32%),radial-gradient(circle_at_bottom,_rgba(192,132,252,0.16),_transparent_34%)]" />
-            <RaceTrack puzzle={puzzle} raceState={raceState} />
+            <RaceTrack
+              cameraProgress={cameraProgress}
+              puzzle={puzzle}
+              raceState={raceState}
+            />
           </div>
 
           <aside className="flex flex-col gap-4">
@@ -172,16 +227,24 @@ export function MarbledleGame() {
 function MarbleGuessCard({
   disabled,
   guess,
+  hasDuplicate,
   marble,
   onChange,
 }: {
   disabled: boolean;
   guess: number | "";
+  hasDuplicate: boolean;
   marble: Marble;
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-3">
+    <label
+      className={
+        hasDuplicate
+          ? "flex items-center gap-3 rounded-lg border border-red-400 bg-red-950/40 p-3 shadow-[0_0_18px_rgba(248,113,113,0.16)]"
+          : "flex items-center gap-3 rounded-lg border border-white/10 bg-slate-950/60 p-3"
+      }
+    >
       <span
         aria-hidden="true"
         className="h-10 w-10 shrink-0 rounded-full border-2 border-white/70 shadow-[inset_-9px_-9px_0_rgba(0,0,0,0.22),0_0_22px_var(--marble-glow)]"
@@ -194,41 +257,52 @@ function MarbleGuessCard({
       />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-black">{marble.name}</span>
-        <span className="text-xs uppercase tracking-[0.16em] text-slate-500">
-          position
+        <span
+          className={
+            hasDuplicate
+              ? "text-xs font-black uppercase tracking-[0.16em] text-red-300"
+              : "text-xs uppercase tracking-[0.16em] text-slate-500"
+          }
+        >
+          {hasDuplicate ? "duplicate" : "position"}
         </span>
       </span>
-      <select
-        className="h-10 rounded-md border border-white/10 bg-slate-900 px-3 text-base font-black text-white outline-none transition focus:border-cyan-300 disabled:opacity-50"
+      <input
+        aria-invalid={hasDuplicate}
+        className={
+          hasDuplicate
+            ? "h-11 w-14 rounded-md border border-red-300 bg-red-950 px-3 text-center text-lg font-black text-white outline-none transition focus:border-red-200 disabled:opacity-50"
+            : "h-11 w-14 rounded-md border border-white/10 bg-slate-900 px-3 text-center text-lg font-black text-white outline-none transition focus:border-cyan-300 disabled:opacity-50"
+        }
         disabled={disabled}
+        inputMode="numeric"
+        maxLength={1}
         onChange={(event) => onChange(event.target.value)}
+        pattern="[1-5]"
         value={guess}
-      >
-        <option value="">-</option>
-        {POSITION_OPTIONS.map((position) => (
-          <option key={position} value={position}>
-            {position}
-          </option>
-        ))}
-      </select>
+      />
     </label>
   );
 }
 
 function RaceTrack({
+  cameraProgress,
   puzzle,
   raceState,
 }: {
+  cameraProgress: number;
   puzzle: ReturnType<typeof getDailyPuzzle>;
   raceState: RaceState;
 }) {
+  const cameraTransform = getCameraTransform(cameraProgress);
+
   return (
-    <div className="absolute inset-0 flex items-center justify-center p-3 sm:p-6">
+    <div className="absolute inset-0 flex items-center justify-center p-2 sm:p-4">
       <svg
         aria-label="Daily vertical marble race track"
-        className="h-full max-h-[1040px] w-full max-w-[520px] overflow-visible"
+        className="h-full w-full max-w-[720px] overflow-hidden"
         role="img"
-        viewBox="0 0 420 980"
+        viewBox="0 0 420 560"
       >
         <defs>
           <filter id="track-glow" x="-40%" y="-40%" width="180%" height="180%">
@@ -236,66 +310,93 @@ function RaceTrack({
           </filter>
         </defs>
 
-        <path
-          d={puzzle.trackPath}
-          fill="none"
-          filter="url(#track-glow)"
-          opacity="0.65"
-          stroke="#22d3ee"
-          strokeLinecap="round"
-          strokeWidth="34"
-        />
-        <path
-          d={puzzle.trackPath}
-          fill="none"
-          stroke="#1e293b"
-          strokeLinecap="round"
-          strokeWidth="30"
-        />
-        <path
-          d={puzzle.trackPath}
-          fill="none"
-          stroke="#67e8f9"
-          strokeDasharray="2 22"
-          strokeLinecap="round"
-          strokeWidth="4"
-        />
+        <rect fill="rgba(2,6,23,0.56)" height="560" width="420" x="0" y="0" />
 
-        <line
-          stroke="#f8fafc"
-          strokeDasharray="10 8"
-          strokeWidth="4"
-          x1="126"
-          x2="294"
-          y1="950"
-          y2="950"
-        />
-        <text
-          fill="#cbd5e1"
-          fontSize="16"
-          fontWeight="800"
-          letterSpacing="3"
-          textAnchor="middle"
-          x="210"
-          y="974"
-        >
-          FINISH
-        </text>
-
-        {puzzle.trackFeatures.map((feature) => (
-          <TrackFeatureMarker feature={feature} key={feature.id} />
-        ))}
-
-        {puzzle.marbles.map((marble) => (
-          <AnimatedMarble
-            finishIndex={puzzle.finishOrder.indexOf(marble.id)}
-            key={marble.id}
-            marble={marble}
-            path={puzzle.trackPath}
-            raceDuration={getMarbleRaceDuration(puzzle, marble.id)}
-            raceState={raceState}
+        <g style={{ transition: raceState === "racing" ? "none" : "transform 500ms ease" }} transform={cameraTransform}>
+          <text
+            fill="#94a3b8"
+            fontSize="13"
+            fontWeight="900"
+            letterSpacing="3"
+            textAnchor="middle"
+            x="210"
+            y="-52"
+          >
+            DROP ZONE
+          </text>
+          <line
+            opacity="0.55"
+            stroke="#38bdf8"
+            strokeDasharray="8 10"
+            strokeWidth="3"
+            x1="112"
+            x2="308"
+            y1="-26"
+            y2="-26"
           />
-        ))}
+
+          <path
+            d={puzzle.trackPath}
+            fill="none"
+            filter="url(#track-glow)"
+            opacity="0.65"
+            stroke="#22d3ee"
+            strokeLinecap="round"
+            strokeWidth="34"
+          />
+          <path
+            d={puzzle.trackPath}
+            fill="none"
+            stroke="#1e293b"
+            strokeLinecap="round"
+            strokeWidth="30"
+          />
+          <path
+            d={puzzle.trackPath}
+            fill="none"
+            stroke="#67e8f9"
+            strokeDasharray="2 22"
+            strokeLinecap="round"
+            strokeWidth="4"
+          />
+
+          <line
+            stroke="#f8fafc"
+            strokeDasharray="10 8"
+            strokeWidth="4"
+            x1="126"
+            x2="294"
+            y1="950"
+            y2="950"
+          />
+          <text
+            fill="#cbd5e1"
+            fontSize="16"
+            fontWeight="800"
+            letterSpacing="3"
+            textAnchor="middle"
+            x="210"
+            y="974"
+          >
+            FINISH
+          </text>
+
+          {puzzle.trackFeatures.map((feature) => (
+            <TrackFeatureMarker feature={feature} key={feature.id} />
+          ))}
+
+          {puzzle.marbles.map((marble, index) => (
+            <AnimatedMarble
+              finishIndex={puzzle.finishOrder.indexOf(marble.id)}
+              key={marble.id}
+              marble={marble}
+              path={puzzle.trackPath}
+              raceDuration={getMarbleRaceDuration(puzzle, marble.id)}
+              raceState={raceState}
+              startIndex={index}
+            />
+          ))}
+        </g>
       </svg>
     </div>
   );
@@ -303,12 +404,10 @@ function RaceTrack({
 
 function TrackFeatureMarker({ feature }: { feature: TrackFeature }) {
   const label = {
-    boost: "BOOST",
     bumper: "BUMPER",
     loop: "LOOP",
     portal: "PORTAL",
     spinner: "SPIN",
-    switchback: "TURN",
   }[feature.kind];
 
   if (feature.kind === "portal") {
@@ -332,7 +431,7 @@ function TrackFeatureMarker({ feature }: { feature: TrackFeature }) {
   return (
     <g transform={`translate(${feature.x} ${feature.y}) rotate(${feature.rotation})`}>
       <rect
-        fill={feature.kind === "boost" ? "#facc15" : "#0f172a"}
+        fill="#0f172a"
         height="18"
         rx="9"
         stroke={feature.kind === "spinner" ? "#a78bfa" : "#38bdf8"}
@@ -342,7 +441,7 @@ function TrackFeatureMarker({ feature }: { feature: TrackFeature }) {
         y="-9"
       />
       <text
-        fill={feature.kind === "boost" ? "#0f172a" : "#e2e8f0"}
+        fill="#e2e8f0"
         fontSize="7"
         fontWeight="900"
         letterSpacing="1"
@@ -361,21 +460,24 @@ function AnimatedMarble({
   path,
   raceDuration,
   raceState,
+  startIndex,
 }: {
   finishIndex: number;
   marble: Marble;
   path: string;
   raceDuration: number;
   raceState: RaceState;
+  startIndex: number;
 }) {
   const finishX = 162 + finishIndex * 24;
+  const startX = 162 + startIndex * 24;
   const isRacing = raceState === "racing";
   const positionProps =
     raceState === "racing"
       ? { cx: 0, cy: 0 }
       : raceState === "finished"
         ? { cx: finishX, cy: 952 }
-        : { cx: 210, cy: 28 };
+        : { cx: startX, cy: -28 };
 
   return (
     <circle
@@ -439,6 +541,49 @@ function StatusPanel({
       </dl>
     </div>
   );
+}
+
+function getDuplicatePositions(guess: PositionGuess) {
+  const counts = new Map<number, number>();
+
+  Object.values(guess).forEach((position) => {
+    if (typeof position !== "number") {
+      return;
+    }
+
+    counts.set(position, (counts.get(position) ?? 0) + 1);
+  });
+
+  return new Set(
+    [...counts.entries()]
+      .filter(([, count]) => count > 1)
+      .map(([position]) => position),
+  );
+}
+
+function getCameraTransform(progress: number) {
+  const zoom = 1.72;
+  const viewportHeight = 560;
+  const viewportCenterY = 275;
+  const focusY = -32 + progress * 1012;
+  const translateX = 210 * (1 - zoom);
+  const minTranslateY = viewportHeight - 1000 * zoom;
+  const maxTranslateY = 96;
+  const translateY = clamp(
+    viewportCenterY - focusY * zoom,
+    minTranslateY,
+    maxTranslateY,
+  );
+
+  return `translate(${round(translateX)} ${round(translateY)}) scale(${zoom})`;
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function round(value: number) {
+  return Math.round(value);
 }
 
 function ResultList({ title, order }: { title: string; order: MarbleId[] }) {

@@ -31,12 +31,12 @@ body {
 }
 
 button,
-select {
+input {
   cursor: pointer;
 }
 
 button:disabled,
-select:disabled {
+input:disabled {
   cursor: not-allowed;
 }
 
