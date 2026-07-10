@@ -6,6 +6,7 @@ import type {
   CuboidSpec,
   PegSpec,
   SensorSpec,
+  TrackSetpiece,
   Vec3,
 } from "@/lib/course";
 
@@ -18,6 +19,20 @@ function setTransform(object: THREE.Object3D, position: Vec3, rotation?: Vec3) {
   if (rotation) {
     object.rotation.set(rotation.x, rotation.y, rotation.z, "XYZ");
   }
+}
+
+function frameFrom(tangentValue: Vec3, rightValue: Vec3) {
+  const tangent = vector(tangentValue).normalize();
+  const right = vector(rightValue).normalize();
+  const up = new THREE.Vector3().crossVectors(tangent, right).normalize();
+  const matrix = new THREE.Matrix4().makeBasis(right, up, tangent);
+  return { tangent, right, up, matrix };
+}
+
+function setPathFrame(object: THREE.Object3D, setpiece: TrackSetpiece, lift = 0) {
+  const frame = frameFrom(setpiece.tangent, setpiece.right);
+  object.position.copy(vector(setpiece.position).add(frame.up.clone().multiplyScalar(lift)));
+  object.quaternion.setFromRotationMatrix(frame.matrix);
 }
 
 function roleMaterial(spec: CuboidSpec): THREE.MeshStandardMaterial {
@@ -120,6 +135,130 @@ function buildTrackRun(spec: CourseSpec): THREE.Group {
   group.add(buildCenterGlow(spec));
 
   return group;
+}
+
+function buildArenaBase(spec: CourseSpec): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "Arena base";
+  const centerX = (spec.bounds.min.x + spec.bounds.max.x) / 2;
+  const centerZ = (spec.bounds.min.z + spec.bounds.max.z) / 2;
+  const size = Math.max(
+    spec.bounds.max.x - spec.bounds.min.x,
+    spec.bounds.max.z - spec.bounds.min.z,
+  ) + 18;
+  const floorY = spec.bounds.min.y + 0.2;
+
+  const floor = new THREE.Mesh(
+    new THREE.PlaneGeometry(size, size),
+    new THREE.MeshStandardMaterial({
+      color: "#050814",
+      emissive: "#0f172a",
+      emissiveIntensity: 0.25,
+      metalness: 0.2,
+      roughness: 0.75,
+    }),
+  );
+  floor.rotation.x = -Math.PI / 2;
+  floor.position.set(centerX, floorY, centerZ);
+  group.add(floor);
+
+  const grid = new THREE.GridHelper(size, 32, "#164e63", "#0f172a");
+  grid.position.set(centerX, floorY + 0.01, centerZ);
+  group.add(grid);
+
+  return group;
+}
+
+function buildSetpieceGroup(spec: CourseSpec): THREE.Group {
+  const group = new THREE.Group();
+  group.name = "Course setpieces";
+
+  spec.path.setpieces.forEach((setpiece) => {
+    if (setpiece.kind === "start-gate") {
+      group.add(buildGateHoop(setpiece, spec.path.width * 0.62, 0.14, 1.55));
+      group.add(buildSidePylon(setpiece, -1, spec.path.width));
+      group.add(buildSidePylon(setpiece, 1, spec.path.width));
+    } else if (setpiece.kind === "checkpoint") {
+      group.add(buildGateHoop(setpiece, spec.path.width * 0.5, 0.075, 1.25));
+    } else if (setpiece.kind === "chaos-zone") {
+      group.add(buildGateHoop(setpiece, spec.path.width * 0.54, 0.11, 1.35));
+      group.add(buildZonePad(setpiece, spec.path.width, "#f472b6"));
+    } else if (setpiece.kind === "helix-beacon") {
+      group.add(buildGateHoop(setpiece, spec.path.width * 0.48, 0.09, 1.45));
+      group.add(buildZonePad(setpiece, spec.path.width * 0.8, "#a78bfa"));
+    } else if (setpiece.kind === "finish-arch") {
+      group.add(buildGateHoop(setpiece, spec.path.width * 0.68, 0.16, 1.7));
+      group.add(buildFinishTray(setpiece, spec.path.width));
+    }
+  });
+
+  return group;
+}
+
+function buildGateHoop(setpiece: TrackSetpiece, radius: number, tube: number, lift: number) {
+  const mesh = new THREE.Mesh(
+    new THREE.TorusGeometry(radius, tube, 12, 64),
+    new THREE.MeshStandardMaterial({
+      color: setpiece.color,
+      emissive: setpiece.color,
+      emissiveIntensity: 0.8,
+      metalness: 0.45,
+      roughness: 0.22,
+    }),
+  );
+  setPathFrame(mesh, setpiece, lift);
+  return mesh;
+}
+
+function buildSidePylon(setpiece: TrackSetpiece, side: -1 | 1, width: number) {
+  const frame = frameFrom(setpiece.tangent, setpiece.right);
+  const pylon = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.16, 0.22, 3.2, 12),
+    new THREE.MeshStandardMaterial({
+      color: "#67e8f9",
+      emissive: "#0891b2",
+      emissiveIntensity: 0.6,
+      metalness: 0.48,
+      roughness: 0.26,
+    }),
+  );
+  pylon.position
+    .copy(vector(setpiece.position))
+    .add(frame.right.clone().multiplyScalar(side * width * 0.58))
+    .add(frame.up.clone().multiplyScalar(1.1));
+  pylon.quaternion.setFromRotationMatrix(frame.matrix);
+  return pylon;
+}
+
+function buildZonePad(setpiece: TrackSetpiece, width: number, color: string) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(width, 0.035, 1.15),
+    new THREE.MeshStandardMaterial({
+      color,
+      emissive: color,
+      emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 0.52,
+      depthWrite: false,
+    }),
+  );
+  setPathFrame(mesh, setpiece, 0.08);
+  return mesh;
+}
+
+function buildFinishTray(setpiece: TrackSetpiece, width: number) {
+  const tray = new THREE.Mesh(
+    new THREE.BoxGeometry(width * 1.15, 0.22, 2.8),
+    new THREE.MeshStandardMaterial({
+      color: "#052e2b",
+      emissive: "#34d399",
+      emissiveIntensity: 0.22,
+      metalness: 0.35,
+      roughness: 0.34,
+    }),
+  );
+  setPathFrame(tray, setpiece, -0.2);
+  return tray;
 }
 
 function buildTrackSurface(spec: CourseSpec): THREE.Mesh {
@@ -264,7 +403,9 @@ function debugPathLine(spec: CourseSpec): THREE.Line {
 
 export function buildStaticCourse(spec: CourseSpec): THREE.Group {
   const group = new THREE.Group();
+  group.add(buildArenaBase(spec));
   group.add(buildTrackRun(spec));
+  group.add(buildSetpieceGroup(spec));
 
   spec.elements.forEach((element) => {
     if (element.kind === "cuboid") {

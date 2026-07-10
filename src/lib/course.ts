@@ -78,6 +78,24 @@ export type TrackSegment = {
   bank: number;
 };
 
+export type SetpieceKind =
+  | "start-gate"
+  | "checkpoint"
+  | "chaos-zone"
+  | "helix-beacon"
+  | "finish-arch";
+
+export type TrackSetpiece = {
+  kind: SetpieceKind;
+  station: number;
+  segmentId: string;
+  position: Vec3;
+  tangent: Vec3;
+  right: Vec3;
+  label: string;
+  color: string;
+};
+
 export type PathSample = {
   station: number;
   position: Vec3;
@@ -93,6 +111,7 @@ export type CoursePath = {
   railHeight: number;
   samples: PathSample[];
   segments: TrackSegment[];
+  setpieces: TrackSetpiece[];
 };
 
 export type MarbleStart = {
@@ -308,12 +327,17 @@ function buildPath(seed: string): CoursePath {
     samples.push({ ...finalSample, station });
   }
 
-  return {
+  const path = {
     length: station,
     width: TRACK_WIDTH,
     railHeight: RAIL_HEIGHT,
     samples,
     segments,
+  };
+
+  return {
+    ...path,
+    setpieces: buildSetpieces(path),
   };
 }
 
@@ -398,6 +422,76 @@ function buildObstacles(seed: string, path: CoursePath): CourseElement[] {
   });
 
   return elements.sort((a, b) => elementStation(a) - elementStation(b));
+}
+
+function buildSetpieces(path: Omit<CoursePath, "setpieces">): TrackSetpiece[] {
+  const setpieces: TrackSetpiece[] = [];
+
+  path.segments.forEach((segment, index) => {
+    const midStation = q((segment.startStation + segment.endStation) / 2);
+    const sample = sampleCoursePath({ ...path, setpieces: [] }, midStation);
+
+    if (segment.kind === "start") {
+      const start = sampleCoursePath({ ...path, setpieces: [] }, 0);
+      setpieces.push({
+        kind: "start-gate",
+        station: 0,
+        segmentId: segment.id,
+        position: start.position,
+        tangent: start.tangent,
+        right: start.right,
+        label: "START",
+        color: "#38bdf8",
+      });
+    } else if (segment.kind === "pinball") {
+      setpieces.push({
+        kind: "chaos-zone",
+        station: midStation,
+        segmentId: segment.id,
+        position: sample.position,
+        tangent: sample.tangent,
+        right: sample.right,
+        label: `CHAOS ${index}`,
+        color: "#f472b6",
+      });
+    } else if (segment.kind === "helix") {
+      setpieces.push({
+        kind: "helix-beacon",
+        station: midStation,
+        segmentId: segment.id,
+        position: sample.position,
+        tangent: sample.tangent,
+        right: sample.right,
+        label: `HELIX ${index}`,
+        color: "#a78bfa",
+      });
+    } else if (segment.kind === "banked-turn") {
+      setpieces.push({
+        kind: "checkpoint",
+        station: midStation,
+        segmentId: segment.id,
+        position: sample.position,
+        tangent: sample.tangent,
+        right: sample.right,
+        label: `GATE ${index}`,
+        color: "#22d3ee",
+      });
+    } else if (segment.kind === "finish") {
+      const finish = sampleCoursePath({ ...path, setpieces: [] }, path.length);
+      setpieces.push({
+        kind: "finish-arch",
+        station: path.length,
+        segmentId: segment.id,
+        position: finish.position,
+        tangent: finish.tangent,
+        right: finish.right,
+        label: "FINISH",
+        color: "#34d399",
+      });
+    }
+  });
+
+  return setpieces;
 }
 
 function elementStation(element: CourseElement): number {

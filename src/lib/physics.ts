@@ -187,7 +187,7 @@ function createMarbleStates(spec: CourseSpec): MarbleState[] {
     speed: 0.35 + random() * 0.3,
     spin: random() * Math.PI,
     phase: random() * Math.PI * 2 + index * 0.7,
-    targetSpeed: baseSpeed * (0.95 + random() * 0.11),
+    targetSpeed: baseSpeed * (0.88 + random() * 0.24),
     nextObstacle: 0,
     verticalVelocity: 0,
     lift: 0,
@@ -229,6 +229,30 @@ function applyObstacle(state: MarbleState, obstacle: ReturnType<typeof sortedObs
   state.obstacleHits += 1;
 }
 
+function applySegmentDynamics(
+  state: MarbleState,
+  kind: CourseSpec["path"]["segments"][number]["kind"],
+  bank: number,
+) {
+  if (kind === "pinball") {
+    state.laneVelocity += Math.sin(state.station * 0.58 + state.phase) * 0.035;
+    state.speed += Math.sin(state.station * 0.21 + state.phase) * 0.006;
+    state.wobble += Math.sin(state.station * 0.41) * 0.003;
+  } else if (kind === "helix") {
+    state.laneVelocity += Math.sin(state.station * 0.32 + state.phase) * 0.024;
+    state.speed += 0.004;
+    state.wobble += Math.cos(state.station * 0.24) * 0.002;
+  } else if (kind === "banked-turn") {
+    state.laneVelocity += bank * 0.045;
+    state.speed += Math.abs(bank) * 0.003;
+  } else if (kind === "finish") {
+    state.laneVelocity += -state.lane * 0.02;
+    state.speed += 0.002;
+  } else if (kind === "start") {
+    state.speed += 0.005;
+  }
+}
+
 function recordMarbleFrame(track: BodyTrack, state: MarbleState, spec: CourseSpec) {
   const sample = sampleCoursePath(spec.path, state.station);
   const lateralLimit = spec.path.width / 2 - spec.marble.radius * 1.2;
@@ -259,6 +283,7 @@ function recordSpinnerFrame(track: BodyTrack, element: Extract<CourseElement, { 
 function runSimulation(spec: CourseSpec, attempts: number) {
   const marbleStates = createMarbleStates(spec);
   const obstacles = sortedObstacles(spec);
+  const segmentById = new Map(spec.path.segments.map((segment) => [segment.id, segment]));
   const spinnerElements = spec.elements.filter(
     (element): element is Extract<CourseElement, { kind: "spinner" }> => element.kind === "spinner",
   );
@@ -291,6 +316,7 @@ function runSimulation(spec: CourseSpec, attempts: number) {
       }
 
       const sample = sampleCoursePath(spec.path, state.station);
+      const segment = segmentById.get(sample.segmentId);
       const slope = clamp(-sample.tangent.y, 0.05, 0.42);
       const target = state.targetSpeed + slope * 1.15;
       const packNoise = Math.sin(state.station * 0.18 + state.phase + steps * 0.018) * 0.18;
@@ -299,6 +325,7 @@ function runSimulation(spec: CourseSpec, attempts: number) {
       state.speed += (target + packNoise - state.speed) * 0.026;
       state.speed = clamp(state.speed, spec.path.length / 58, spec.path.length / 32);
       state.laneVelocity += Math.sin(state.station * 0.22 + state.phase) * 0.018;
+      applySegmentDynamics(state, segment?.kind ?? "sweep", sample.bank);
       state.laneVelocity *= 0.982;
       state.lane += state.laneVelocity * DT;
       state.verticalVelocity -= 2.8 * DT;

@@ -46,6 +46,9 @@ describe("generateCourse", () => {
     expect(spec.path.segments.map((segment) => segment.kind)).toEqual(
       expect.arrayContaining(["start", "sweep", "banked-turn", "helix", "pinball", "finish"]),
     );
+    expect(spec.path.setpieces.map((setpiece) => setpiece.kind)).toEqual(
+      expect.arrayContaining(["start-gate", "checkpoint", "chaos-zone", "helix-beacon", "finish-arch"]),
+    );
     expect(spec.elements.some((e) => e.kind === "bumper")).toBe(true);
     expect(spec.elements.some((e) => e.kind === "spinner")).toBe(true);
   });
