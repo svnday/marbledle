@@ -9,6 +9,7 @@ import { join, resolve } from "node:path";
 const appPort = Number(process.env.MARBLEDLE_E2E_PORT ?? 3200);
 const debugPort = Number(process.env.MARBLEDLE_E2E_DEBUG_PORT ?? 9322);
 const appUrl = `http://localhost:${appPort}`;
+const captureBaseline = process.env.MARBLEDLE_CAPTURE_BASELINE === "1";
 const chromePath = findChrome();
 const errors = [];
 const warnings = [];
@@ -44,7 +45,15 @@ try {
   await cdp.send("Emulation.setEmulatedMedia", {
     features: [{ name: "prefers-reduced-motion", value: "reduce" }],
   });
-  await cdp.send("Page.navigate", { url: appUrl });
+  if (captureBaseline) {
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      width: Number(process.env.MARBLEDLE_VIEWPORT_WIDTH ?? 1440),
+      height: Number(process.env.MARBLEDLE_VIEWPORT_HEIGHT ?? 900),
+      deviceScaleFactor: Number(process.env.MARBLEDLE_DEVICE_SCALE_FACTOR ?? 1),
+      mobile: process.env.MARBLEDLE_MOBILE === "1",
+    });
+  }
+  await cdp.send("Page.navigate", { url: captureBaseline ? `${appUrl}/?metrics=1` : appUrl });
   await waitForLoad(cdp, 60_000);
   await waitForExpression(
     cdp,
@@ -75,6 +84,53 @@ try {
 
   const screenshot = await cdp.send("Page.captureScreenshot", { format: "png" });
   assert((screenshot.data?.length ?? 0) > 60_000, "Expected a non-trivial page screenshot.");
+
+  if (captureBaseline) {
+    await delay(3_000);
+    const baseline = await evaluate(cdp, `(() => {
+      const navigation = performance.getEntriesByType('navigation')[0];
+      const resources = performance.getEntriesByType('resource');
+      const scripts = resources.filter((entry) => entry.initiatorType === 'script');
+      const frameSamples = window.__MARBLEDLE_METRICS__?.frameSamplesMs ?? [];
+      const sorted = [...frameSamples].sort((a, b) => a - b);
+      const percentile = (p) => sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] : null;
+      const canvas = document.querySelector('canvas')?.getBoundingClientRect();
+      return {
+        viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+        layout: {
+          scrollWidth: document.documentElement.scrollWidth,
+          clientWidth: document.documentElement.clientWidth,
+          canvas: canvas ? { width: canvas.width, height: canvas.height } : null,
+        },
+        navigation: navigation ? {
+          responseEndMs: navigation.responseEnd,
+          domContentLoadedMs: navigation.domContentLoadedEventEnd,
+          loadEventMs: navigation.loadEventEnd,
+          transferBytes: navigation.transferSize,
+          decodedBytes: navigation.decodedBodySize,
+        } : null,
+        clientScriptNetwork: {
+          requests: scripts.length,
+          transferBytes: scripts.reduce((sum, entry) => sum + entry.transferSize, 0),
+          decodedBytes: scripts.reduce((sum, entry) => sum + entry.decodedBodySize, 0),
+        },
+        renderer: {
+          ...window.__MARBLEDLE_METRICS__,
+          frameSamplesMs: undefined,
+          frameSampleCount: frameSamples.length,
+          frameMedianMs: percentile(0.5),
+          frameP95Ms: percentile(0.95),
+          frameP99Ms: percentile(0.99),
+        },
+        memory: performance.memory ? {
+          usedJsHeapBytes: performance.memory.usedJSHeapSize,
+          totalJsHeapBytes: performance.memory.totalJSHeapSize,
+          jsHeapLimitBytes: performance.memory.jsHeapSizeLimit,
+        } : null,
+      };
+    })()`);
+    console.log(`MARBLEDLE_BASELINE=${JSON.stringify(baseline)}`);
+  }
 
   await evaluate(cdp, `(() => {
     const inputs = [...document.querySelectorAll('input[pattern="[1-5]"]')];
@@ -129,7 +185,8 @@ try {
 function startNextServer(port) {
   const bin = process.execPath;
   const nextCli = resolve("node_modules", "next", "dist", "bin", "next");
-  const child = spawn(bin, [nextCli, "dev", "--port", String(port)], {
+  const command = process.env.MARBLEDLE_E2E_SERVER === "production" ? "start" : "dev";
+  const child = spawn(bin, [nextCli, command, "--port", String(port)], {
     cwd: process.cwd(),
     env: { ...process.env, NEXT_TELEMETRY_DISABLED: "1" },
     stdio: ["ignore", "pipe", "pipe"],

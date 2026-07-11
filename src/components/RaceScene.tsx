@@ -4,6 +4,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { sampleCoursePath, type CourseSpec, type Vec3 } from "@/lib/course";
 import type { Trajectory } from "@/lib/physics";
+import { getPerformanceMetrics } from "@/lib/performanceMetrics";
 import {
   buildColliderWireframes,
   buildMarbleMeshes,
@@ -128,6 +129,7 @@ export function RaceScene({
     const pathTangent = new THREE.Vector3();
     const pathRight = new THREE.Vector3();
     let previousCameraNow = performance.now();
+    let previousFrameNow = previousCameraNow;
     let cameraInitialized = false;
 
     const sampleTrack = (frames: number[], frameFloat: number, mesh: THREE.Mesh) => {
@@ -272,6 +274,19 @@ export function RaceScene({
       updateStartGate(now);
       updateCamera(now, frameFloat);
       renderer.render(scene, camera);
+      const metrics = getPerformanceMetrics();
+      if (metrics) {
+        const frameMs = now - previousFrameNow;
+        previousFrameNow = now;
+        if (Number.isFinite(frameMs) && frameMs > 0) {
+          metrics.frameSamplesMs.push(frameMs);
+          if (metrics.frameSamplesMs.length > 600) metrics.frameSamplesMs.shift();
+        }
+        metrics.drawCalls = renderer.info.render.calls;
+        metrics.triangles = renderer.info.render.triangles;
+        metrics.geometries = renderer.info.memory.geometries;
+        metrics.textures = renderer.info.memory.textures;
+      }
       frameId = window.requestAnimationFrame(renderFrame);
     };
 

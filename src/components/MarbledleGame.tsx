@@ -19,6 +19,7 @@ import {
 } from "@/lib/game";
 import type { RaceResult } from "@/lib/physics";
 import { RaceScene } from "@/components/RaceScene";
+import { getPerformanceMetrics } from "@/lib/performanceMetrics";
 
 type RaceState = "guessing" | "racing" | "finished";
 
@@ -47,12 +48,23 @@ export function MarbledleGame() {
   // out of the initial bundle; it only loads after mount.
   useEffect(() => {
     let cancelled = false;
+    const startedAt = performance.now();
 
     import("@/lib/physics")
       .then(({ simulateRace }) => simulateRace(puzzle.courseSpec))
       .then((result) => {
         if (cancelled) {
           return;
+        }
+        const metrics = getPerformanceMetrics();
+        if (metrics) {
+          metrics.raceGenerationMs = performance.now() - startedAt;
+          metrics.raceFrames = result.trajectory.frameCount;
+          metrics.raceTracks = result.trajectory.tracks.length;
+          metrics.trajectoryNumbers = result.trajectory.tracks.reduce(
+            (total, track) => total + track.frames.length,
+            0,
+          );
         }
         setRace(result);
       });
@@ -61,6 +73,25 @@ export function MarbledleGame() {
       cancelled = true;
     };
   }, [puzzle.courseSpec]);
+
+  useEffect(() => {
+    const metrics = getPerformanceMetrics();
+    if (!metrics || typeof PerformanceObserver === "undefined") {
+      return;
+    }
+
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        metrics.longTasks.push({ durationMs: entry.duration, startTimeMs: entry.startTime });
+      }
+    });
+    try {
+      observer.observe({ type: "longtask", buffered: true });
+    } catch {
+      return;
+    }
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const media = window.matchMedia("(prefers-reduced-motion: reduce)");
