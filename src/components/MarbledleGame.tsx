@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   type Marble,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/game";
 import type { RaceResult } from "@/lib/physics";
 import { RaceScene } from "@/components/RaceScene";
+import { ShowcaseScene } from "@/components/ShowcaseScene";
 import { getPerformanceMetrics } from "@/lib/performanceMetrics";
 
 type RaceState = "guessing" | "racing" | "finished";
@@ -32,6 +34,11 @@ export function MarbledleGame() {
   const [raceState, setRaceState] = useState<RaceState>("guessing");
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
   const [showDebugColliders, setShowDebugColliders] = useState(false);
+  const showcasePreview = useSyncExternalStore(
+    () => () => {},
+    () => IS_DEV && new URLSearchParams(window.location.search).get("course") === "showcase-v1",
+    () => false,
+  );
 
   const validation = getGuessValidation(guess);
   const guessedOrder = useMemo(() => guessToOrder(guess), [guess]);
@@ -44,8 +51,7 @@ export function MarbledleGame() {
     [guessedOrder, race, raceState],
   );
 
-  // Precompute today's race once, on the client. The dynamic import keeps the Rapier WASM
-  // out of the initial bundle; it only loads after mount.
+  // Precompute today's race once using the explicitly retained path-sim@1.0.0 fallback.
   useEffect(() => {
     let cancelled = false;
     const startedAt = performance.now();
@@ -211,7 +217,9 @@ export function MarbledleGame() {
 
         <section className="grid flex-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
           <div className="relative min-h-[780px] overflow-hidden rounded-lg border border-cyan-300/20 bg-[#050814] shadow-2xl shadow-cyan-950/30">
-            {race ? (
+            {showcasePreview ? (
+              <ShowcaseScene showDebug={showDebugColliders} />
+            ) : race ? (
               <RaceScene
                 spec={race.spec}
                 trajectory={race.trajectory}
@@ -222,7 +230,7 @@ export function MarbledleGame() {
               <RacePlaceholder isReady={isReady} raceState={raceState} />
             )}
             <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-cyan-300/30 bg-slate-950/70 px-3 py-1 text-xs font-black uppercase tracking-[0.18em] text-cyan-200">
-              Follow camera
+              {showcasePreview ? "showcase-v1 · static module preview" : "Follow camera · path-sim@1.0.0"}
             </div>
           </div>
 
@@ -237,7 +245,9 @@ export function MarbledleGame() {
                 onClick={() => setShowDebugColliders((current) => !current)}
                 type="button"
               >
-                {showDebugColliders ? "Hide collider wireframe" : "Show collider wireframe"}
+                {showDebugColliders
+                  ? showcasePreview ? "Hide module alignment debug" : "Hide collider wireframe"
+                  : showcasePreview ? "Show module alignment debug" : "Show collider wireframe"}
               </button>
             ) : null}
 

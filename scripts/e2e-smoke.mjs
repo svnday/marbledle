@@ -10,6 +10,7 @@ const appPort = Number(process.env.MARBLEDLE_E2E_PORT ?? 3200);
 const debugPort = Number(process.env.MARBLEDLE_E2E_DEBUG_PORT ?? 9322);
 const appUrl = `http://localhost:${appPort}`;
 const captureBaseline = process.env.MARBLEDLE_CAPTURE_BASELINE === "1";
+const showcasePreview = process.env.MARBLEDLE_SHOWCASE_PREVIEW === "1";
 const chromePath = findChrome();
 const errors = [];
 const warnings = [];
@@ -53,11 +54,17 @@ try {
       mobile: process.env.MARBLEDLE_MOBILE === "1",
     });
   }
-  await cdp.send("Page.navigate", { url: captureBaseline ? `${appUrl}/?metrics=1` : appUrl });
+  const query = new URLSearchParams();
+  if (captureBaseline) query.set("metrics", "1");
+  if (showcasePreview) query.set("course", "showcase-v1");
+  const pageUrl = query.size ? `${appUrl}/?${query}` : appUrl;
+  await cdp.send("Page.navigate", { url: pageUrl });
   await waitForLoad(cdp, 60_000);
   await waitForExpression(
     cdp,
-    `Boolean(document.querySelector('canvas[aria-label="3D marble race"]'))`,
+    showcasePreview
+      ? `Boolean(document.querySelector('canvas[aria-label="showcase-v1 modular course preview"]'))`
+      : `Boolean(document.querySelector('canvas[aria-label="3D marble race"]'))`,
     60_000,
   );
   await waitForExpression(
@@ -67,7 +74,7 @@ try {
   );
 
   const initial = await evaluate(cdp, `(() => {
-    const canvas = document.querySelector('canvas[aria-label="3D marble race"]');
+    const canvas = document.querySelector('canvas');
     const rect = canvas.getBoundingClientRect();
     const lock = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('Lock guess'));
     return {
